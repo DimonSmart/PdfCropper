@@ -19,6 +19,14 @@ byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, cancellationToken);
 
 The method throws `PdfCropException` with a specific `PdfCropErrorCode` when the input is invalid, encrypted or cannot be processed.
 
+### Command line utility
+
+The repository also contains a console application that wraps the library. Build and run it with the input and output PDF paths:
+
+```bash
+dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf output.pdf
+```
+
 ## Development
 
 * Library target framework: `.NET 8.0`.
