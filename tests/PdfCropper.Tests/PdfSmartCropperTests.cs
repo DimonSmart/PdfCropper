@@ -139,6 +139,63 @@ public class PdfSmartCropperTests
     }
 
     [Fact]
+    public async Task CropAsync_ThickOrthogonalLines_KeepsFullStroke()
+    {
+        const float lineWidth = 40f;
+        const float verticalX = 250f;
+        const float verticalStartY = 100f;
+        const float verticalEndY = 400f;
+        const float horizontalY = 260f;
+        const float horizontalStartX = 120f;
+        const float horizontalEndX = 380f;
+
+        var input = CreatePdf(pdf =>
+        {
+            var verticalPage = pdf.AddNewPage(PageSize.A4);
+            var verticalCanvas = new PdfCanvas(verticalPage);
+            verticalCanvas.SetLineWidth(lineWidth);
+            verticalCanvas.MoveTo(verticalX, verticalStartY);
+            verticalCanvas.LineTo(verticalX, verticalEndY);
+            verticalCanvas.Stroke();
+
+            var horizontalPage = pdf.AddNewPage(PageSize.A4);
+            var horizontalCanvas = new PdfCanvas(horizontalPage);
+            horizontalCanvas.SetLineWidth(lineWidth);
+            horizontalCanvas.MoveTo(horizontalStartX, horizontalY);
+            horizontalCanvas.LineTo(horizontalEndX, horizontalY);
+            horizontalCanvas.Stroke();
+        });
+
+        var cropped = await PdfSmartCropper.CropAsync(input);
+
+        using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
+
+        var verticalPage = result.GetPage(1);
+        var verticalCrop = verticalPage.GetCropBox();
+        var verticalMedia = verticalPage.GetMediaBox();
+
+        var horizontalPage = result.GetPage(2);
+        var horizontalCrop = horizontalPage.GetCropBox();
+        var horizontalMedia = horizontalPage.GetMediaBox();
+
+        var halfWidth = lineWidth / 2f;
+
+        Assert.True(verticalCrop.GetWidth() < verticalMedia.GetWidth());
+        Assert.True(verticalCrop.GetWidth() >= lineWidth - 1);
+        Assert.True(verticalCrop.GetLeft() <= verticalX - halfWidth);
+        Assert.True(verticalCrop.GetRight() >= verticalX + halfWidth);
+        Assert.True(verticalCrop.GetBottom() <= verticalStartY);
+        Assert.True(verticalCrop.GetTop() >= verticalEndY);
+
+        Assert.True(horizontalCrop.GetHeight() < horizontalMedia.GetHeight());
+        Assert.True(horizontalCrop.GetHeight() >= lineWidth - 1);
+        Assert.True(horizontalCrop.GetBottom() <= horizontalY - halfWidth);
+        Assert.True(horizontalCrop.GetTop() >= horizontalY + halfWidth);
+        Assert.True(horizontalCrop.GetLeft() <= horizontalStartX);
+        Assert.True(horizontalCrop.GetRight() >= horizontalEndX);
+    }
+
+    [Fact]
     public async Task CropAsync_LargeDocument_CompletesSuccessfully()
     {
         var input = CreatePdf(pdf =>

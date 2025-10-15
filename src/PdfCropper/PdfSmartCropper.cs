@@ -234,20 +234,49 @@ public static class PdfSmartCropper
             }
 
             var matrix = info.GetCtm();
+            var strokeExpandX = 0d;
+            var strokeExpandY = 0d;
+
+            if ((info.GetOperation() & PathRenderInfo.STROKE) != 0)
+            {
+                var lineWidth = info.GetLineWidth();
+                if (lineWidth > 0)
+                {
+                    var halfWidth = lineWidth / 2d;
+                    if (matrix == null)
+                    {
+                        strokeExpandX = halfWidth;
+                        strokeExpandY = halfWidth;
+                    }
+                    else
+                    {
+                        var unitX = TransformDisplacement(matrix, 1, 0);
+                        var unitY = TransformDisplacement(matrix, 0, 1);
+
+                        var a = unitX.Get(Vector.I1);
+                        var c = unitX.Get(Vector.I2);
+                        var b = unitY.Get(Vector.I1);
+                        var d = unitY.Get(Vector.I2);
+
+                        strokeExpandX = halfWidth * Math.Sqrt(a * a + b * b);
+                        strokeExpandY = halfWidth * Math.Sqrt(c * c + d * d);
+                    }
+                }
+            }
 
             foreach (var subpath in path.GetSubpaths())
             {
                 var startPoint = subpath.GetStartPoint();
                 if (startPoint != null)
                 {
-                    IncludePoint(TransformPoint(startPoint, matrix));
+                    IncludePoint(TransformPoint(startPoint, matrix), strokeExpandX, strokeExpandY);
                 }
 
                 foreach (var segment in subpath.GetSegments())
                 {
                     foreach (var point in segment.GetBasePoints())
                     {
-                        IncludePoint(TransformPoint(point, matrix));
+                        IncludePoint(TransformPoint(point, matrix), strokeExpandX, strokeExpandY);
                     }
                 }
             }
@@ -305,7 +334,7 @@ public static class PdfSmartCropper
             return new Rectangle((float)left, (float)bottom, (float)width, (float)height);
         }
 
-        private void IncludePoint(Vector? point)
+        private void IncludePoint(Vector? point, double expandX = 0, double expandY = 0)
         {
             if (point == null)
             {
@@ -315,24 +344,29 @@ public static class PdfSmartCropper
             var x = point.Get(Vector.I1);
             var y = point.Get(Vector.I2);
 
-            if (!_minX.HasValue || x < _minX)
+            var minX = x - expandX;
+            var minY = y - expandY;
+            var maxX = x + expandX;
+            var maxY = y + expandY;
+
+            if (!_minX.HasValue || minX < _minX)
             {
-                _minX = x;
+                _minX = minX;
             }
 
-            if (!_minY.HasValue || y < _minY)
+            if (!_minY.HasValue || minY < _minY)
             {
-                _minY = y;
+                _minY = minY;
             }
 
-            if (!_maxX.HasValue || x > _maxX)
+            if (!_maxX.HasValue || maxX > _maxX)
             {
-                _maxX = x;
+                _maxX = maxX;
             }
 
-            if (!_maxY.HasValue || y > _maxY)
+            if (!_maxY.HasValue || maxY > _maxY)
             {
-                _maxY = y;
+                _maxY = maxY;
             }
         }
 
@@ -346,6 +380,12 @@ public static class PdfSmartCropper
             var vector = new Vector((float)point.GetX(), (float)point.GetY(), 1);
 
             return matrix == null ? vector : vector.Cross(matrix);
+        }
+
+        private static Vector TransformDisplacement(Matrix matrix, double x, double y)
+        {
+            var vector = new Vector((float)x, (float)y, 0);
+            return vector.Cross(matrix);
         }
     }
 }
