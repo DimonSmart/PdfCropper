@@ -32,11 +32,6 @@ public static class PdfSmartCropper
             var readerProps = new ReaderProperties();
 
             using var reader = new PdfReader(inputStream, readerProps);
-            if (reader.IsEncrypted())
-            {
-                throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, "Cannot crop encrypted PDF.");
-            }
-
             using var writer = new PdfWriter(outputStream, new WriterProperties());
             using var pdfDocument = new PdfDocument(reader, writer);
 
@@ -202,13 +197,13 @@ public static class PdfSmartCropper
 
         private void HandleText(TextRenderInfo info)
         {
-            IncludeLine(info.GetAscentLine());
-            IncludeLine(info.GetDescentLine());
+            IncludeLineEndpoints(info.GetAscentLine());
+            IncludeLineEndpoints(info.GetDescentLine());
 
             foreach (var characterInfo in info.GetCharacterRenderInfos())
             {
-                IncludeLine(characterInfo.GetAscentLine());
-                IncludeLine(characterInfo.GetDescentLine());
+                IncludeLineEndpoints(characterInfo.GetAscentLine());
+                IncludeLineEndpoints(characterInfo.GetDescentLine());
             }
         }
 
@@ -258,14 +253,15 @@ public static class PdfSmartCropper
             }
         }
 
-        private void IncludeLine(LineSegment? segment)
+        private void IncludeLineEndpoints(LineSegment? segment)
         {
             if (segment == null)
             {
                 return;
             }
 
-            IncludeRectangle(segment.GetBoundingRectangle());
+            IncludePoint(segment.GetStartPoint());
+            IncludePoint(segment.GetEndPoint());
         }
 
         private void IncludeRectangle(Rectangle? rectangle)
@@ -340,14 +336,16 @@ public static class PdfSmartCropper
             }
         }
 
-        private static Vector? TransformPoint(Vector? point, Matrix? matrix)
+        private static Vector? TransformPoint(Point? point, Matrix? matrix)
         {
             if (point == null)
             {
                 return null;
             }
 
-            return matrix == null ? point : point.Cross(matrix);
+            var vector = new Vector((float)point.GetX(), (float)point.GetY(), 1);
+
+            return matrix == null ? vector : vector.Cross(matrix);
         }
     }
 }
