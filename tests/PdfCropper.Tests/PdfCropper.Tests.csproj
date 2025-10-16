@@ -20,5 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\PdfCropper\PdfCropper.csproj" />
+    <ProjectReference Include="..\..\src\PdfCropper.Cli\PdfCropper.Cli.csproj" />
   </ItemGroup>
 </Project>

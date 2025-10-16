@@ -116,50 +116,52 @@ static async Task<int> RunAsync(string[] args)
         return 1;
     }
 
+    var inputHasMask = BatchPlanner.ContainsGlobPattern(inputPath);
+    var outputHasMask = BatchPlanner.ContainsGlobPattern(outputPath);
+
+    if (inputHasMask)
+    {
+        var plan = BatchPlanner.CreatePlan(inputPath, outputPath);
+        if (!plan.Success)
+        {
+            Console.Error.WriteLine($"Error: {plan.ErrorMessage}");
+            return plan.ExitCode;
+        }
+
+        var logger = new ConsoleLogger(logLevel);
+        foreach (var item in plan.Files)
+        {
+            logger.LogInfo($"Processing {item.InputPath} -> {item.OutputPath}");
+            if (!File.Exists(item.InputPath))
+            {
+                Console.Error.WriteLine($"Error: Input file '{item.InputPath}' was not found.");
+                return 2;
+            }
+
+            var exitCode = await CropFileAsync(item.InputPath, item.OutputPath, settings, logger);
+            if (exitCode != 0)
+            {
+                return exitCode;
+            }
+        }
+
+        return 0;
+    }
+
+    if (outputHasMask)
+    {
+        Console.Error.WriteLine("Error: Output path cannot contain wildcards when input is a single file.");
+        return 1;
+    }
+
     if (!File.Exists(inputPath))
     {
         Console.Error.WriteLine($"Error: Input file '{inputPath}' was not found.");
         return 2;
     }
 
-    var logger = new ConsoleLogger(logLevel);
-
-    try
-    {
-        logger.LogInfo($"Reading input file: {inputPath}");
-        var inputBytes = await File.ReadAllBytesAsync(inputPath);
-
-        logger.LogInfo($"Cropping PDF using {settings.Method} method...");
-        if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
-        {
-            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
-        }
-
-        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, settings, logger);
-
-        var targetDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
-        if (!string.IsNullOrEmpty(targetDirectory))
-        {
-            Directory.CreateDirectory(targetDirectory);
-        }
-
-        logger.LogInfo($"Writing output file: {outputPath}");
-        await File.WriteAllBytesAsync(outputPath, croppedBytes);
-
-        Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
-        return 0;
-    }
-    catch (PdfCropException ex)
-    {
-        logger.LogError($"Cropping failed: {ex.Message}");
-        return MapErrorCode(ex.Code);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError($"Unexpected error: {ex.Message}");
-        logger.LogError($"Stack trace: {ex.StackTrace}");
-        return 99;
-    }
+    var singleLogger = new ConsoleLogger(logLevel);
+    return await CropFileAsync(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), settings, singleLogger);
 }
 
 static void ShowUsage()
@@ -182,11 +184,56 @@ static void ShowUsage()
     Console.WriteLine("                        debug = debug information");
     Console.WriteLine("                        trace = very detailed tracing");
     Console.WriteLine();
+    Console.WriteLine("Input masks:");
+    Console.WriteLine("  Use wildcards (e.g. scans/*.pdf) to crop multiple files at once.");
+    Console.WriteLine("  Output can be a mask (out/*_CROP.pdf) or a directory path.");
+    Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 1 -v");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --margin 2.0");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
+    Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
+}
+
+static async Task<int> CropFileAsync(string inputPath, string outputPath, CropSettings settings, ConsoleLogger logger)
+{
+    try
+    {
+        logger.LogInfo($"Reading input file: {inputPath}");
+        var inputBytes = await File.ReadAllBytesAsync(inputPath);
+
+        logger.LogInfo($"Cropping PDF using {settings.Method} method...");
+        if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
+        {
+            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+        }
+
+        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, settings, logger);
+
+        var targetDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        logger.LogInfo($"Writing output file: {outputPath}");
+        await File.WriteAllBytesAsync(outputPath, croppedBytes);
+
+        Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
+        return 0;
+    }
+    catch (PdfCropException ex)
+    {
+        logger.LogError($"Cropping failed: {ex.Message}");
+        return MapErrorCode(ex.Code);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError($"Unexpected error: {ex.Message}");
+        logger.LogError($"Stack trace: {ex.StackTrace}");
+        return 99;
+    }
 }
 
 static bool TryParseMethod(string value, out CropSettings settings)
