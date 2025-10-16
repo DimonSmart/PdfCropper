@@ -1,6 +1,25 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using PdfCropper;
 using PdfCropper.Cli;
+
+// Set console encoding to UTF-8 to properly display Unicode characters
+try
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    Console.InputEncoding = Encoding.UTF8;
+    
+    // On Windows, also try to set the console code page to UTF-8
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    {
+        Console.OutputEncoding = new UTF8Encoding(false);
+    }
+}
+catch
+{
+    // Fallback to default encoding if UTF-8 setup fails
+}
 
 return await RunAsync(args);
 
