@@ -1,8 +1,5 @@
-using System.Runtime.Serialization;
-
 namespace DimonSmart.PdfCropper;
 
-[Serializable]
 public class PdfCropException : Exception
 {
     public PdfCropErrorCode Code { get; }
@@ -26,19 +23,6 @@ public class PdfCropException : Exception
         : base(message, innerException)
     {
         Code = code;
-    }
-
-    protected PdfCropException(SerializationInfo info, StreamingContext context)
-        : base(info, context)
-    {
-        Code = (PdfCropErrorCode)info.GetValue(nameof(Code), typeof(PdfCropErrorCode))!;
-    }
-
-    public override void GetObjectData(SerializationInfo info, StreamingContext context)
-    {
-        ArgumentNullException.ThrowIfNull(info);
-        info.AddValue(nameof(Code), Code);
-        base.GetObjectData(info, context);
     }
 
     private static string GetMessage(PdfCropErrorCode code) => code switch
