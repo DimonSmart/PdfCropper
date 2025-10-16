@@ -4,6 +4,8 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Data;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
+using PDFtoImage;
+using SkiaSharp;
 
 namespace PdfCropper;
 
@@ -11,17 +13,41 @@ public static class PdfSmartCropper
 {
     private const float SafetyMargin = 0.5f;
 
+    /// <summary>
+    /// Crops a PDF document using the default content-based method.
+    /// </summary>
+    /// <param name="inputPdf">The input PDF as a byte array.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The cropped PDF as a byte array.</returns>
     public static Task<byte[]> CropAsync(byte[] inputPdf, CancellationToken ct = default)
+    {
+        return CropAsync(inputPdf, CropMethod.ContentBased, null, ct);
+    }
+
+    /// <summary>
+    /// Crops a PDF document using the specified method.
+    /// </summary>
+    /// <param name="inputPdf">The input PDF as a byte array.</param>
+    /// <param name="method">The cropping method to use.</param>
+    /// <param name="logger">Optional logger for cropping operations.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The cropped PDF as a byte array.</returns>
+    public static Task<byte[]> CropAsync(
+        byte[] inputPdf, 
+        CropMethod method, 
+        IPdfCropLogger? logger = null,
+        CancellationToken ct = default)
     {
         if (inputPdf is null)
         {
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return Task.Run(() => CropInternal(inputPdf, ct), ct);
+        logger ??= NullLogger.Instance;
+        return Task.Run(() => CropInternal(inputPdf, method, logger, ct), ct);
     }
 
-    private static byte[] CropInternal(byte[] inputPdf, CancellationToken ct)
+    private static byte[] CropInternal(byte[] inputPdf, CropMethod method, IPdfCropLogger logger, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -36,45 +62,56 @@ public static class PdfSmartCropper
             using var pdfDocument = new PdfDocument(reader, writer);
 
             int pageCount = pdfDocument.GetNumberOfPages();
+            logger.LogInfo($"Processing PDF with {pageCount} page(s) using {method} method");
+
             for (int pageIndex = 1; pageIndex <= pageCount; pageIndex++)
             {
                 ct.ThrowIfCancellationRequested();
                 var page = pdfDocument.GetPage(pageIndex);
+                var pageSize = page.GetPageSize();
+
+                logger.LogInfo($"Page {pageIndex}/{pageCount}: Size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts");
 
                 if (IsPageEmpty(page, ct))
                 {
+                    logger.LogWarning($"Page {pageIndex}: Skipped (empty page)");
                     continue;
                 }
 
-                var collector = new ContentBoundingBoxCollector(ct);
-                var processor = new PdfCanvasProcessor(collector);
-                processor.ProcessPageContent(page);
-
-                var bounds = collector.Bounds;
-                if (!bounds.HasValue)
+                Rectangle? cropRectangle = method switch
                 {
-                    continue;
-                }
+                    CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, ct),
+                    CropMethod.BitmapBased => CropPageBitmapBased(inputPdf, pageIndex, pageSize, logger, ct),
+                    _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown crop method")
+                };
 
-                var cropRectangle = bounds.Value.ToRectangle(page.GetPageSize(), SafetyMargin);
                 if (cropRectangle == null)
                 {
+                    logger.LogWarning($"Page {pageIndex}: No crop applied (no content bounds found)");
                     continue;
                 }
 
+                logger.LogInfo($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})");
+                
                 page.SetCropBox(cropRectangle);
                 page.SetTrimBox(cropRectangle);
+
+                var newSize = page.GetPageSize();
+                logger.LogInfo($"Page {pageIndex}: New size = {newSize.GetWidth():F2} x {newSize.GetHeight():F2} pts");
             }
 
             pdfDocument.Close();
+            logger.LogInfo("PDF cropping completed successfully");
             return outputStream.ToArray();
         }
         catch (OperationCanceledException)
         {
+            logger.LogWarning("PDF cropping cancelled");
             throw;
         }
         catch (BadPasswordException ex)
         {
+            logger.LogError($"PDF is encrypted: {ex.Message}");
             throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
         }
         catch (PdfCropException)
@@ -85,19 +122,138 @@ public static class PdfSmartCropper
         {
             if (IsEncryptionError(ex))
             {
+                logger.LogError($"PDF encryption error: {ex.Message}");
                 throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
             }
 
+            logger.LogError($"Invalid PDF: {ex.Message}");
             throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
         }
         catch (IOException ex)
         {
+            logger.LogError($"I/O error: {ex.Message}");
             throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
         }
         catch (Exception ex)
         {
+            logger.LogError($"Processing error: {ex.Message}");
             throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
         }
+    }
+
+    private static Rectangle? CropPageContentBased(PdfPage page, IPdfCropLogger logger, int pageIndex, CancellationToken ct)
+    {
+        var collector = new ContentBoundingBoxCollector(ct);
+        var processor = new PdfCanvasProcessor(collector);
+        processor.ProcessPageContent(page);
+
+        var bounds = collector.Bounds;
+        if (!bounds.HasValue)
+        {
+            return null;
+        }
+
+        logger.LogInfo($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})");
+
+        return bounds.Value.ToRectangle(page.GetPageSize(), SafetyMargin);
+    }
+
+    private static Rectangle? CropPageBitmapBased(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, CancellationToken ct)
+    {
+        const byte threshold = 250; // Pixels darker than this are considered content
+
+        try
+        {
+            logger.LogInfo($"Page {pageIndex}: Rendering to bitmap");
+
+            // Render PDF page to bitmap (uses default DPI, typically 300)
+            using var bitmap = Conversion.ToImage(inputPdf, page: pageIndex - 1);
+            
+            logger.LogInfo($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels");
+
+            // Find content bounds in bitmap
+            var (minX, minY, maxX, maxY) = FindContentBoundsInBitmap(bitmap, threshold, ct);
+
+            if (minX >= maxX || minY >= maxY)
+            {
+                logger.LogWarning($"Page {pageIndex}: No content found in bitmap");
+                return null;
+            }
+
+            logger.LogInfo($"Page {pageIndex}: Content pixels = ({minX}, {minY}) to ({maxX}, {maxY})");
+
+            // Convert pixel coordinates to PDF points
+            var scaleX = pageSize.GetWidth() / bitmap.Width;
+            var scaleY = pageSize.GetHeight() / bitmap.Height;
+
+            var left = minX * scaleX - SafetyMargin;
+            var bottom = pageSize.GetHeight() - (maxY * scaleY) - SafetyMargin;
+            var right = maxX * scaleX + SafetyMargin;
+            var top = pageSize.GetHeight() - (minY * scaleY) + SafetyMargin;
+
+            // Clamp to page bounds
+            left = Math.Max(pageSize.GetLeft(), left);
+            bottom = Math.Max(pageSize.GetBottom(), bottom);
+            right = Math.Min(pageSize.GetRight(), right);
+            top = Math.Min(pageSize.GetTop(), top);
+
+            var width = right - left;
+            var height = top - bottom;
+
+            if (width <= 0 || height <= 0)
+            {
+                return null;
+            }
+
+            logger.LogInfo($"Page {pageIndex}: PDF coordinates = ({left:F2}, {bottom:F2}, {width:F2}, {height:F2})");
+
+            return new Rectangle((float)left, (float)bottom, (float)width, (float)height);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Page {pageIndex}: Bitmap rendering failed: {ex.Message}");
+            throw;
+        }
+    }
+
+    private static (int minX, int minY, int maxX, int maxY) FindContentBoundsInBitmap(SKBitmap bitmap, byte threshold, CancellationToken ct)
+    {
+        int minX = bitmap.Width;
+        int minY = bitmap.Height;
+        int maxX = 0;
+        int maxY = 0;
+
+        var pixels = bitmap.Bytes;
+        var bytesPerPixel = bitmap.BytesPerPixel;
+
+        for (int y = 0; y < bitmap.Height; y++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                var offset = (y * bitmap.RowBytes) + (x * bytesPerPixel);
+                
+                // Check if pixel is dark enough to be content
+                // For BGRA format: B=0, G=1, R=2, A=3
+                var b = pixels[offset];
+                var g = pixels[offset + 1];
+                var r = pixels[offset + 2];
+                
+                // Calculate luminance
+                var luminance = (byte)(0.299 * r + 0.587 * g + 0.114 * b);
+                
+                if (luminance < threshold)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        return (minX, minY, maxX, maxY);
     }
 
     private static bool IsPageEmpty(PdfPage page, CancellationToken ct)
