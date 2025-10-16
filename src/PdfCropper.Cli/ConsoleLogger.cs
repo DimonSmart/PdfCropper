@@ -5,18 +5,24 @@ namespace PdfCropper.Cli;
 /// <summary>
 /// Simple console logger implementation.
 /// </summary>
+internal enum LogLevel
+{
+    None,
+    Info
+}
+
 internal sealed class ConsoleLogger : IPdfCropLogger
 {
-    private readonly bool _verbose;
+    private readonly LogLevel _level;
 
-    public ConsoleLogger(bool verbose = false)
+    public ConsoleLogger(LogLevel level)
     {
-        _verbose = verbose;
+        _level = level;
     }
 
     public void LogInfo(string message)
     {
-        if (_verbose)
+        if (_level >= LogLevel.Info)
         {
             Console.WriteLine($"[INFO] {message}");
         }
@@ -24,6 +30,11 @@ internal sealed class ConsoleLogger : IPdfCropLogger
 
     public void LogWarning(string message)
     {
+        if (_level == LogLevel.None)
+        {
+            return;
+        }
+
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine($"[WARN] {message}");

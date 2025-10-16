@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using iText.Kernel.Exceptions;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
@@ -51,6 +52,8 @@ public static class PdfSmartCropper
     {
         ct.ThrowIfCancellationRequested();
 
+        var totalStopwatch = Stopwatch.StartNew();
+
         try
         {
             using var inputStream = new MemoryStream(inputPdf, writable: false);
@@ -68,13 +71,16 @@ public static class PdfSmartCropper
             {
                 ct.ThrowIfCancellationRequested();
                 var page = pdfDocument.GetPage(pageIndex);
+                var pageStopwatch = Stopwatch.StartNew();
                 var pageSize = page.GetPageSize();
 
-                logger.LogInfo($"Page {pageIndex}/{pageCount}: Size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts");
+                logger.LogInfo($"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts");
 
                 if (IsPageEmpty(page, ct))
                 {
                     logger.LogWarning($"Page {pageIndex}: Skipped (empty page)");
+                    pageStopwatch.Stop();
+                    logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
                     continue;
                 }
 
@@ -88,20 +94,26 @@ public static class PdfSmartCropper
                 if (cropRectangle == null)
                 {
                     logger.LogWarning($"Page {pageIndex}: No crop applied (no content bounds found)");
+                    pageStopwatch.Stop();
+                    logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
                     continue;
                 }
 
                 logger.LogInfo($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})");
-                
+
                 page.SetCropBox(cropRectangle);
                 page.SetTrimBox(cropRectangle);
 
-                var newSize = page.GetPageSize();
-                logger.LogInfo($"Page {pageIndex}: New size = {newSize.GetWidth():F2} x {newSize.GetHeight():F2} pts");
+                logger.LogInfo($"Page {pageIndex}: Cropped size = {cropRectangle.GetWidth():F2} x {cropRectangle.GetHeight():F2} pts");
+
+                pageStopwatch.Stop();
+                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
             }
 
             pdfDocument.Close();
+            totalStopwatch.Stop();
             logger.LogInfo("PDF cropping completed successfully");
+            logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
             return outputStream.ToArray();
         }
         catch (OperationCanceledException)
@@ -268,6 +280,13 @@ public static class PdfSmartCropper
         var message = exception.Message ?? string.Empty;
         return message.Contains("encrypted", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("password", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        return elapsed.TotalMilliseconds < 1000
+            ? $"{elapsed.TotalMilliseconds:F2} ms"
+            : $"{elapsed.TotalSeconds:F2} s";
     }
 
     private readonly struct BoundingBox
