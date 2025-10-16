@@ -15,7 +15,7 @@ PdfCropper is a .NET library that intelligently trims PDF pages to actual conten
 
 ## Usage
 
-### Basic Usage (ContentBased method)
+### Basic Usage (ContentBased method - default)
 
 ```csharp
 using PdfCropper;

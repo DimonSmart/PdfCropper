@@ -7,7 +7,7 @@
 ```csharp
 using PdfCropper;
 
-// Simplest way - uses ContentBased method
+// Simplest way - uses ContentBased method (default)
 byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
 byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf);
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);

@@ -22,18 +22,14 @@ internal sealed class ConsoleLogger : IPdfCropLogger
 
     public void LogInfo(string message)
     {
-        if (_level >= LogLevel.Info)
-        {
-            Console.WriteLine($"[INFO] {message}");
-        }
+        if (_level < LogLevel.Info) return;
+        
+        Console.WriteLine($"[INFO] {message}");
     }
 
     public void LogWarning(string message)
     {
-        if (_level == LogLevel.None)
-        {
-            return;
-        }
+        if (_level == LogLevel.None) return;
 
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Yellow;

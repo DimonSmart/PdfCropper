@@ -5,7 +5,6 @@ return await RunAsync(args);
 
 static async Task<int> RunAsync(string[] args)
 {
-    // Parse arguments
     if (args.Length < 2)
     {
         ShowUsage();
@@ -17,14 +16,15 @@ static async Task<int> RunAsync(string[] args)
     var method = CropMethod.ContentBased;
     var logLevel = LogLevel.None;
 
-    // Parse optional arguments
     for (int i = 2; i < args.Length; i++)
     {
         if (args[i] == "-v" || args[i] == "--verbose")
         {
             logLevel = LogLevel.Info;
+            continue;
         }
-        else if (args[i] == "-l" || args[i] == "--log-level")
+
+        if (args[i] == "-l" || args[i] == "--log-level")
         {
             if (i + 1 >= args.Length)
             {
@@ -33,22 +33,18 @@ static async Task<int> RunAsync(string[] args)
             }
 
             var levelValue = args[i + 1].ToLowerInvariant();
-            logLevel = levelValue switch
-            {
-                "none" => LogLevel.None,
-                "info" => LogLevel.Info,
-                _ => LogLevel.None
-            };
-
             if (levelValue != "none" && levelValue != "info")
             {
                 Console.Error.WriteLine($"Error: Invalid log level '{args[i + 1]}'. Use 'none' or 'info'.");
                 return 1;
             }
 
+            logLevel = levelValue == "info" ? LogLevel.Info : LogLevel.None;
             i++;
+            continue;
         }
-        else if (args[i] == "-m" || args[i] == "--method")
+
+        if (args[i] == "-m" || args[i] == "--method")
         {
             if (i + 1 >= args.Length)
             {
@@ -63,13 +59,12 @@ static async Task<int> RunAsync(string[] args)
             }
             
             method = (CropMethod)methodValue;
-            i++; // Skip the next argument
+            i++;
+            continue;
         }
-        else
-        {
-            Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
-            return 1;
-        }
+
+        Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
+        return 1;
     }
 
     if (!File.Exists(inputPath))

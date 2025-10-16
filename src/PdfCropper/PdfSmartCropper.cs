@@ -10,20 +10,12 @@ using SkiaSharp;
 
 namespace PdfCropper;
 
+/// <summary>
+/// Provides methods for intelligently cropping PDF documents to actual content bounds.
+/// </summary>
 public static class PdfSmartCropper
 {
     private const float SafetyMargin = 0.5f;
-
-    /// <summary>
-    /// Crops a PDF document using the default content-based method.
-    /// </summary>
-    /// <param name="inputPdf">The input PDF as a byte array.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAsync(byte[] inputPdf, CancellationToken ct = default)
-    {
-        return CropAsync(inputPdf, CropMethod.ContentBased, null, ct);
-    }
 
     /// <summary>
     /// Crops a PDF document using the specified method.
@@ -35,7 +27,7 @@ public static class PdfSmartCropper
     /// <returns>The cropped PDF as a byte array.</returns>
     public static Task<byte[]> CropAsync(
         byte[] inputPdf, 
-        CropMethod method, 
+        CropMethod method = CropMethod.ContentBased, 
         IPdfCropLogger? logger = null,
         CancellationToken ct = default)
     {
@@ -172,18 +164,16 @@ public static class PdfSmartCropper
 
     private static Rectangle? CropPageBitmapBased(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, CancellationToken ct)
     {
-        const byte threshold = 250; // Pixels darker than this are considered content
+        const byte threshold = 250;
 
         try
         {
             logger.LogInfo($"Page {pageIndex}: Rendering to bitmap");
 
-            // Render PDF page to bitmap (uses default DPI, typically 300)
             using var bitmap = Conversion.ToImage(inputPdf, page: pageIndex - 1);
             
             logger.LogInfo($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels");
 
-            // Find content bounds in bitmap
             var (minX, minY, maxX, maxY) = FindContentBoundsInBitmap(bitmap, threshold, ct);
 
             if (minX >= maxX || minY >= maxY)
@@ -193,8 +183,6 @@ public static class PdfSmartCropper
             }
 
             logger.LogInfo($"Page {pageIndex}: Content pixels = ({minX}, {minY}) to ({maxX}, {maxY})");
-
-            // Convert pixel coordinates to PDF points
             var scaleX = pageSize.GetWidth() / bitmap.Width;
             var scaleY = pageSize.GetHeight() / bitmap.Height;
 
@@ -203,7 +191,6 @@ public static class PdfSmartCropper
             var right = maxX * scaleX + SafetyMargin;
             var top = pageSize.GetHeight() - (minY * scaleY) + SafetyMargin;
 
-            // Clamp to page bounds
             left = Math.Max(pageSize.GetLeft(), left);
             bottom = Math.Max(pageSize.GetBottom(), bottom);
             right = Math.Min(pageSize.GetRight(), right);
@@ -246,13 +233,10 @@ public static class PdfSmartCropper
             {
                 var offset = (y * bitmap.RowBytes) + (x * bytesPerPixel);
                 
-                // Check if pixel is dark enough to be content
-                // For BGRA format: B=0, G=1, R=2, A=3
                 var b = pixels[offset];
                 var g = pixels[offset + 1];
                 var r = pixels[offset + 2];
                 
-                // Calculate luminance
                 var luminance = (byte)(0.299 * r + 0.587 * g + 0.114 * b);
                 
                 if (luminance < threshold)
