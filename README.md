@@ -15,7 +15,7 @@ DimonSmart.PdfCropper is a cross-platform .NET library that intelligently trims 
 ✅ **macOS** - Full support  
 ✅ **Other Unix systems** - Compatible with .NET runtime  
 
-**Target Frameworks**: .NET 6.0, .NET 8.0, .NET 9.0
+**Target Frameworks**: .NET 8.0, .NET 9.0
 
 ## Installation
 
@@ -130,13 +130,13 @@ dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf outpu
 | Feature | ContentBased | BitmapBased |
 |---------|-------------|-------------|
 | Speed | ⚡ Fast | 🐌 Slower |
-| Quality | ✅ Preserves vector quality | ⚠️ Rasterizes content |
+| Quality | ✅ Preserves vector quality | ✅ Preserves vector quality |
 | Accuracy | Good for standard documents | Better for complex layouts |
 | Use case | Most PDFs | PDFs with complex graphics |
 
 ## Development
 
-* Library target frameworks: `.NET 6.0`, `.NET 8.0`, `.NET 9.0`
+* Library target frameworks: `.NET 8.0`, `.NET 9.0`
 * Cross-platform support: Windows, Linux, macOS, and other Unix systems
 * Dependencies:
   * iText 9.3.0 (PDF manipulation)

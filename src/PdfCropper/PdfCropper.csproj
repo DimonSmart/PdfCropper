@@ -3,10 +3,11 @@
     <Configuration>Release</Configuration>
     <IsPackable>true</IsPackable>
     <OutputType>Library</OutputType>
-    <TargetFrameworks>net6.0;net8.0;net9.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <Title>DimonSmart.PdfCropper</Title>
     <Description>A cross-platform .NET library that intelligently trims PDF pages to actual content using content-based or bitmap-based analysis. Supports Windows, Linux, macOS and other .NET-compatible platforms. Perfect for preparing e-books and documents by removing excessive margins and whitespace.</Description>
@@ -20,10 +21,11 @@
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <PackageVersion>1.0.1</PackageVersion>
-    <Version>1.0.1</Version>
-    <PackageReleaseNotes>v1.0.1: Added cross-platform support (Windows, Linux, macOS), updated package icon, improved multi-target framework support (.NET 6.0, 8.0, 9.0)</PackageReleaseNotes>
+    <PackageVersion>1.0.2</PackageVersion>
+    <Version>1.0.2</Version>
+    <PackageReleaseNotes>v1.0.2: Fixed build issues, removed .NET 6.0 support due to dependency conflicts, improved compatibility with .NET 8.0 and 9.0</PackageReleaseNotes>
     <SupportedOSPlatformVersion>10.0</SupportedOSPlatformVersion>
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
   
   <ItemGroup>

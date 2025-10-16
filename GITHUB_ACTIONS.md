@@ -14,7 +14,7 @@ This repository uses GitHub Actions for continuous integration and deployment. T
 
 **Matrix Strategy:**
 - **Operating Systems**: Ubuntu, Windows, macOS
-- **.NET Versions**: 6.0.x, 8.0.x, 9.0.x
+- **.NET Versions**: 8.0.x, 9.0.x
 
 **Steps:**
 1. Checkout code

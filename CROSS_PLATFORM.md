@@ -11,7 +11,6 @@ DimonSmart.PdfCropper is designed to work across multiple operating systems and 
 ✅ **Other Unix systems** (FreeBSD, etc., where .NET is supported)  
 
 ### .NET Versions
-✅ **.NET 6.0** (LTS)  
 ✅ **.NET 8.0** (LTS)  
 ✅ **.NET 9.0**  
 
