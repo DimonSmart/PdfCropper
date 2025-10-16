@@ -22,8 +22,8 @@
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <PackageVersion>1.0.4</PackageVersion>
-    <Version>1.0.4</Version>
+    <PackageVersion>1.0.6</PackageVersion>
+    <Version>1.0.6</Version>
     <SupportedOSPlatformVersion>10.0</SupportedOSPlatformVersion>
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
@@ -31,6 +31,8 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="True" PackagePath="/" />
     <None Include="PdfCropperIcon.png" Pack="True" PackagePath="/" />
+    <None Include="..\..\docs\images\before_crop.png" Pack="True" PackagePath="docs/images/" />
+    <None Include="..\..\docs\images\after_crop.png" Pack="True" PackagePath="docs/images/" />
   </ItemGroup>
   
   <ItemGroup>
