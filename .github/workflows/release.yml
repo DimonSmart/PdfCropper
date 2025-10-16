@@ -9,6 +9,9 @@ jobs:
   release:
     name: Create Release and Publish NuGet
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
 
     steps:
     - name: Checkout code
