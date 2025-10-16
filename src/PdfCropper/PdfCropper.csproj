@@ -21,8 +21,8 @@
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <PackageVersion>1.0.3</PackageVersion>
-    <Version>1.0.3</Version>
+    <PackageVersion>1.0.4</PackageVersion>
+    <Version>1.0.4</Version>
     <SupportedOSPlatformVersion>10.0</SupportedOSPlatformVersion>
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
