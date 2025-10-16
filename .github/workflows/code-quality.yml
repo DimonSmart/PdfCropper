@@ -42,13 +42,6 @@ jobs:
     - name: Generate coverage report
       run: reportgenerator -reports:"./test-results/**/coverage.cobertura.xml" -targetdir:"./coverage-report" -reporttypes:"Html;Cobertura"
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./test-results/**/coverage.cobertura.xml
-        fail_ci_if_error: false
-
     - name: Upload coverage report as artifact
       uses: actions/upload-artifact@v4
       with:

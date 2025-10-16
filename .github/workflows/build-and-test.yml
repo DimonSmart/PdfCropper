@@ -48,14 +48,6 @@ jobs:
       if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
       run: reportgenerator -reports:"./test-results/**/coverage.cobertura.xml" -targetdir:"./coverage-report" -reporttypes:"Html;Cobertura"
 
-    - name: Upload coverage reports to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
-      uses: codecov/codecov-action@v4
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: './test-results/**/coverage.cobertura.xml'
-        fail_ci_if_error: false
-
     - name: Upload coverage report as artifact
       if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
       uses: actions/upload-artifact@v4
@@ -86,13 +78,13 @@ jobs:
         sudo apt-get install -y libfontconfig1 libgdiplus libc6-dev
 
     - name: Restore dependencies
-      run: dotnet restore src/PdfCropper/PdfCropper.csproj
+      run: dotnet restore src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
 
     - name: Build project
-      run: dotnet build src/PdfCropper/PdfCropper.csproj --configuration Release --no-restore
+      run: dotnet build src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-restore
 
     - name: Create NuGet package
-      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --no-build --output ./artifacts
+      run: dotnet pack src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-build --output ./artifacts
 
     - name: Upload NuGet package as artifact
       uses: actions/upload-artifact@v4

@@ -4,6 +4,7 @@
 [![NuGet Version](https://img.shields.io/nuget/v/DimonSmart.PdfCropper)](https://www.nuget.org/packages/DimonSmart.PdfCropper)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/DimonSmart.PdfCropper)](https://www.nuget.org/packages/DimonSmart.PdfCropper)
 [![License](https://img.shields.io/badge/license-0BSD-blue.svg)](LICENSE)
+
 DimonSmart.PdfCropper is a cross-platform .NET library that intelligently trims PDF pages to actual content using two different methods.
 The library exposes a simple API through `PdfSmartCropper.CropAsync`, which accepts a PDF document in memory and returns a new PDF with recalculated `CropBox` and `TrimBox` on every non-empty page.
 

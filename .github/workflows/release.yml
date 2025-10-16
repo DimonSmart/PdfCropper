@@ -35,17 +35,17 @@ jobs:
 
     - name: Update project version
       run: |
-        sed -i "s/<PackageVersion>.*<\/PackageVersion>/<PackageVersion>${{ steps.extract_version.outputs.VERSION }}<\/PackageVersion>/" src/PdfCropper/PdfCropper.csproj
-        sed -i "s/<Version>.*<\/Version>/<Version>${{ steps.extract_version.outputs.VERSION }}<\/Version>/" src/PdfCropper/PdfCropper.csproj
+        sed -i "s/<PackageVersion>.*<\/PackageVersion>/<PackageVersion>${{ steps.extract_version.outputs.VERSION }}<\/PackageVersion>/" src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
+        sed -i "s/<Version>.*<\/Version>/<Version>${{ steps.extract_version.outputs.VERSION }}<\/Version>/" src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
 
     - name: Restore dependencies
-      run: dotnet restore src/PdfCropper/PdfCropper.csproj
+      run: dotnet restore src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
 
     - name: Build project
-      run: dotnet build src/PdfCropper/PdfCropper.csproj --configuration Release --no-restore
+      run: dotnet build src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-restore
 
     - name: Create package
-      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --no-build --output ./artifacts
+      run: dotnet pack src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-build --output ./artifacts
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
