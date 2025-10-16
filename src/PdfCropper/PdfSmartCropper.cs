@@ -31,16 +31,33 @@ public static class PdfSmartCropper
         IPdfCropLogger? logger = null,
         CancellationToken ct = default)
     {
+        return CropAsync(inputPdf, new CropSettings(method), logger, ct);
+    }
+
+    /// <summary>
+    /// Crops a PDF document using the specified settings.
+    /// </summary>
+    /// <param name="inputPdf">The input PDF as a byte array.</param>
+    /// <param name="settings">Cropping settings to apply.</param>
+    /// <param name="logger">Optional logger for cropping operations.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The cropped PDF as a byte array.</returns>
+    public static Task<byte[]> CropAsync(
+        byte[] inputPdf,
+        CropSettings settings,
+        IPdfCropLogger? logger = null,
+        CancellationToken ct = default)
+    {
         if (inputPdf is null)
         {
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
         logger ??= NullLogger.Instance;
-        return Task.Run(() => CropInternal(inputPdf, method, logger, ct), ct);
+        return Task.Run(() => CropInternal(inputPdf, settings, logger, ct), ct);
     }
 
-    private static byte[] CropInternal(byte[] inputPdf, CropMethod method, IPdfCropLogger logger, CancellationToken ct)
+    private static byte[] CropInternal(byte[] inputPdf, CropSettings settings, IPdfCropLogger logger, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -57,7 +74,12 @@ public static class PdfSmartCropper
             using var pdfDocument = new PdfDocument(reader, writer);
 
             var pageCount = pdfDocument.GetNumberOfPages();
-            logger.LogInfo($"Processing PDF with {pageCount} page(s) using {method} method");
+            logger.LogInfo($"Processing PDF with {pageCount} page(s) using {settings.Method} method");
+
+            if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
+            {
+                logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+            }
 
             for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
             {
@@ -76,11 +98,11 @@ public static class PdfSmartCropper
                     continue;
                 }
 
-                var cropRectangle = method switch
+                var cropRectangle = settings.Method switch
                 {
-                    CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, ct),
+                    CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, settings.ExcludeEdgeTouchingObjects, ct),
                     CropMethod.BitmapBased => CropPageBitmapBased(inputPdf, pageIndex, pageSize, logger, ct),
-                    _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown crop method")
+                    _ => throw new ArgumentOutOfRangeException(nameof(settings.Method), settings.Method, "Unknown crop method")
                 };
 
                 if (cropRectangle == null)
@@ -145,9 +167,9 @@ public static class PdfSmartCropper
         }
     }
 
-    private static Rectangle? CropPageContentBased(PdfPage page, IPdfCropLogger logger, int pageIndex, CancellationToken ct)
+    private static Rectangle? CropPageContentBased(PdfPage page, IPdfCropLogger logger, int pageIndex, bool excludeEdgeTouchingObjects, CancellationToken ct)
     {
-        var collector = new ContentBoundingBoxCollector(ct);
+        var collector = new ContentBoundingBoxCollector(page.GetPageSize(), excludeEdgeTouchingObjects, ct);
         var processor = new PdfCanvasProcessor(collector);
         processor.ProcessPageContent(page);
 
@@ -302,14 +324,17 @@ public static class PdfSmartCropper
         }
     }
 
-    private sealed class ContentBoundingBoxCollector(CancellationToken ct) : IEventListener
+    private sealed class ContentBoundingBoxCollector(Rectangle pageBox, bool excludeEdgeTouchingObjects, CancellationToken ct) : IEventListener
     {
+        private const double EdgeExclusionDelta = 1.0;
         private static readonly ICollection<EventType> SupportedEvents = new[]
         {
             EventType.RENDER_TEXT,
             EventType.RENDER_IMAGE,
             EventType.RENDER_PATH
         };
+        private readonly Rectangle _pageBox = pageBox;
+        private readonly bool _excludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
         private double? _minX;
         private double? _minY;
         private double? _maxX;
@@ -341,14 +366,17 @@ public static class PdfSmartCropper
 
         private void HandleText(TextRenderInfo info)
         {
-            IncludeLineEndpoints(info.GetAscentLine());
-            IncludeLineEndpoints(info.GetDescentLine());
+            var builder = new BoundsBuilder();
+            builder.Include(info.GetAscentLine());
+            builder.Include(info.GetDescentLine());
 
             foreach (var characterInfo in info.GetCharacterRenderInfos())
             {
-                IncludeLineEndpoints(characterInfo.GetAscentLine());
-                IncludeLineEndpoints(characterInfo.GetDescentLine());
+                builder.Include(characterInfo.GetAscentLine());
+                builder.Include(characterInfo.GetDescentLine());
             }
+
+            CommitBounds(builder, 0, 0);
         }
 
         private void HandleImage(ImageRenderInfo info)
@@ -363,10 +391,13 @@ public static class PdfSmartCropper
             var width = image?.GetWidth() ?? 1;
             var height = image?.GetHeight() ?? 1;
 
-            IncludeTransformedPoint(matrix, 0, 0);
-            IncludeTransformedPoint(matrix, width, 0);
-            IncludeTransformedPoint(matrix, 0, height);
-            IncludeTransformedPoint(matrix, width, height);
+            var builder = new BoundsBuilder();
+            builder.Include(TransformPoint(0, 0, matrix));
+            builder.Include(TransformPoint(width, 0, matrix));
+            builder.Include(TransformPoint(0, height, matrix));
+            builder.Include(TransformPoint(width, height, matrix));
+
+            CommitBounds(builder, 0, 0);
         }
 
         private void HandlePath(PathRenderInfo info)
@@ -408,110 +439,73 @@ public static class PdfSmartCropper
                 }
             }
 
+            var builder = new BoundsBuilder();
             foreach (var subpath in path.GetSubpaths())
             {
                 var startPoint = subpath.GetStartPoint();
-                if (startPoint != null)
-                {
-                    IncludePoint(TransformPoint(startPoint, matrix), strokeExpandX, strokeExpandY);
-                }
+                builder.Include(TransformPoint(startPoint, matrix));
 
                 foreach (var segment in subpath.GetSegments())
                 {
                     foreach (var point in segment.GetBasePoints())
                     {
-                        IncludePoint(TransformPoint(point, matrix), strokeExpandX, strokeExpandY);
+                        builder.Include(TransformPoint(point, matrix));
                     }
                 }
             }
+
+            CommitBounds(builder, strokeExpandX, strokeExpandY);
         }
 
-        private void IncludeLineEndpoints(LineSegment? segment)
+        private void CommitBounds(BoundsBuilder builder, double expandX, double expandY)
         {
-            if (segment == null)
+            if (!builder.TryBuild(expandX, expandY, out var bounds))
             {
                 return;
             }
 
-            IncludePoint(segment.GetStartPoint());
-            IncludePoint(segment.GetEndPoint());
+            RegisterBounds(bounds);
         }
 
-        private void IncludeRectangle(Rectangle? rectangle)
+        private void RegisterBounds(BoundingBox bounds)
         {
-            if (rectangle == null)
+            if (_excludeEdgeTouchingObjects && TouchesPageEdge(bounds))
             {
                 return;
             }
 
-            var normalized = NormalizeRectangle(rectangle);
-            if (normalized == null)
+            if (!_minX.HasValue || bounds.MinX < _minX)
             {
-                return;
+                _minX = bounds.MinX;
             }
 
-            IncludePoint(new Vector(normalized.GetLeft(), normalized.GetBottom(), 1));
-            IncludePoint(new Vector(normalized.GetRight(), normalized.GetTop(), 1));
+            if (!_minY.HasValue || bounds.MinY < _minY)
+            {
+                _minY = bounds.MinY;
+            }
+
+            if (!_maxX.HasValue || bounds.MaxX > _maxX)
+            {
+                _maxX = bounds.MaxX;
+            }
+
+            if (!_maxY.HasValue || bounds.MaxY > _maxY)
+            {
+                _maxY = bounds.MaxY;
+            }
         }
 
-        private void IncludeTransformedPoint(Matrix matrix, double x, double y)
+        private bool TouchesPageEdge(BoundingBox bounds)
         {
-            var vector = new Vector((float)x, (float)y, 1);
-            IncludePoint(vector.Cross(matrix));
-        }
+            var left = _pageBox.GetLeft();
+            var right = _pageBox.GetRight();
+            var bottom = _pageBox.GetBottom();
+            var top = _pageBox.GetTop();
 
-        private static Rectangle? NormalizeRectangle(Rectangle rectangle)
-        {
-            var left = Math.Min(rectangle.GetLeft(), rectangle.GetRight());
-            var right = Math.Max(rectangle.GetLeft(), rectangle.GetRight());
-            var bottom = Math.Min(rectangle.GetBottom(), rectangle.GetTop());
-            var top = Math.Max(rectangle.GetBottom(), rectangle.GetTop());
-
-            var width = right - left;
-            var height = top - bottom;
-
-            if (width <= 0 || height <= 0)
-            {
-                return null;
-            }
-
-            return new Rectangle((float)left, (float)bottom, (float)width, (float)height);
-        }
-
-        private void IncludePoint(Vector? point, double expandX = 0, double expandY = 0)
-        {
-            if (point == null)
-            {
-                return;
-            }
-
-            var x = point.Get(Vector.I1);
-            var y = point.Get(Vector.I2);
-
-            var minX = x - expandX;
-            var minY = y - expandY;
-            var maxX = x + expandX;
-            var maxY = y + expandY;
-
-            if (!_minX.HasValue || minX < _minX)
-            {
-                _minX = minX;
-            }
-
-            if (!_minY.HasValue || minY < _minY)
-            {
-                _minY = minY;
-            }
-
-            if (!_maxX.HasValue || maxX > _maxX)
-            {
-                _maxX = maxX;
-            }
-
-            if (!_maxY.HasValue || maxY > _maxY)
-            {
-                _maxY = maxY;
-            }
+            return bounds.MinX <= left + EdgeExclusionDelta ||
+                   bounds.MinY <= bottom + EdgeExclusionDelta ||
+                   bounds.MaxX >= right - EdgeExclusionDelta ||
+                   bounds.MaxY >= top - EdgeExclusionDelta;
         }
 
         private static Vector? TransformPoint(Point? point, Matrix? matrix)
@@ -526,10 +520,82 @@ public static class PdfSmartCropper
             return matrix == null ? vector : vector.Cross(matrix);
         }
 
+        private static Vector? TransformPoint(double x, double y, Matrix matrix)
+        {
+            var vector = new Vector((float)x, (float)y, 1);
+            return vector.Cross(matrix);
+        }
+
         private static Vector TransformDisplacement(Matrix matrix, double x, double y)
         {
             var vector = new Vector((float)x, (float)y, 0);
             return vector.Cross(matrix);
+        }
+
+        private sealed class BoundsBuilder
+        {
+            private double? _minX;
+            private double? _minY;
+            private double? _maxX;
+            private double? _maxY;
+
+            public void Include(LineSegment? segment)
+            {
+                if (segment == null)
+                {
+                    return;
+                }
+
+                Include(segment.GetStartPoint());
+                Include(segment.GetEndPoint());
+            }
+
+            public void Include(Vector? point)
+            {
+                if (point == null)
+                {
+                    return;
+                }
+
+                var x = point.Get(Vector.I1);
+                var y = point.Get(Vector.I2);
+
+                if (!_minX.HasValue || x < _minX)
+                {
+                    _minX = x;
+                }
+
+                if (!_minY.HasValue || y < _minY)
+                {
+                    _minY = y;
+                }
+
+                if (!_maxX.HasValue || x > _maxX)
+                {
+                    _maxX = x;
+                }
+
+                if (!_maxY.HasValue || y > _maxY)
+                {
+                    _maxY = y;
+                }
+            }
+
+            public bool TryBuild(double expandX, double expandY, out BoundingBox bounds)
+            {
+                if (!_minX.HasValue || !_minY.HasValue || !_maxX.HasValue || !_maxY.HasValue)
+                {
+                    bounds = default;
+                    return false;
+                }
+
+                bounds = new BoundingBox(
+                    _minX.Value - expandX,
+                    _minY.Value - expandY,
+                    _maxX.Value + expandX,
+                    _maxY.Value + expandY);
+                return true;
+            }
         }
     }
 }

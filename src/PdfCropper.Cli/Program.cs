@@ -33,7 +33,7 @@ static async Task<int> RunAsync(string[] args)
 
     var inputPath = args[0];
     var outputPath = args[1];
-    var method = CropMethod.ContentBased;
+    var settings = CropSettings.Default;
     var logLevel = LogLevel.None;
 
     for (var i = 2; i < args.Length; i++)
@@ -79,17 +79,16 @@ static async Task<int> RunAsync(string[] args)
         {
             if (i + 1 >= args.Length)
             {
-                Console.Error.WriteLine("Error: --method requires a value (0 or 1)");
+                Console.Error.WriteLine("Error: --method requires a value (0, 1, 00, or 01)");
                 return 1;
             }
 
-            if (!int.TryParse(args[i + 1], out var methodValue) || (methodValue != 0 && methodValue != 1))
+            if (!TryParseMethod(args[i + 1], out settings))
             {
-                Console.Error.WriteLine("Error: method must be 0 (ContentBased) or 1 (BitmapBased)");
+                Console.Error.WriteLine("Error: method must be 0, 1, 00, or 01");
                 return 1;
             }
 
-            method = (CropMethod)methodValue;
             i++;
             continue;
         }
@@ -111,8 +110,13 @@ static async Task<int> RunAsync(string[] args)
         logger.LogInfo($"Reading input file: {inputPath}");
         var inputBytes = await File.ReadAllBytesAsync(inputPath);
 
-        logger.LogInfo($"Cropping PDF using {method} method...");
-        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, method, logger);
+        logger.LogInfo($"Cropping PDF using {settings.Method} method...");
+        if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
+        {
+            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+        }
+
+        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, settings, logger);
 
         var targetDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (!string.IsNullOrEmpty(targetDirectory))
@@ -144,9 +148,11 @@ static void ShowUsage()
     Console.WriteLine("Usage: PdfCropper.Cli <input.pdf> <output.pdf> [options]");
     Console.WriteLine();
     Console.WriteLine("Options:");
-    Console.WriteLine("  -m, --method <0|1>    Cropping method:");
-    Console.WriteLine("                        0 = ContentBased (default, analyzes PDF content)");
-    Console.WriteLine("                        1 = BitmapBased (renders to image, slower but more accurate)");
+    Console.WriteLine("  -m, --method <mode>   Cropping mode:");
+    Console.WriteLine("                        0  = ContentBased (default, analyzes PDF content)");
+    Console.WriteLine("                        00 = ContentBased with edge-touching content included");
+    Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
+    Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
     Console.WriteLine("  -l, --log-level <lvl> Logging level:");
     Console.WriteLine("                        none = no logging (default)");
@@ -159,6 +165,38 @@ static void ShowUsage()
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 1 -v");
+}
+
+static bool TryParseMethod(string value, out CropSettings settings)
+{
+    settings = CropSettings.Default;
+
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var normalized = value.Trim();
+
+    if (normalized == "0" || normalized == "00")
+    {
+        settings = new CropSettings(CropMethod.ContentBased);
+        return true;
+    }
+
+    if (normalized == "01")
+    {
+        settings = new CropSettings(CropMethod.ContentBased, true);
+        return true;
+    }
+
+    if (normalized == "1")
+    {
+        settings = new CropSettings(CropMethod.BitmapBased);
+        return true;
+    }
+
+    return false;
 }
 
 static int MapErrorCode(PdfCropErrorCode code) => code switch
