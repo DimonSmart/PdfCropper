@@ -19,7 +19,7 @@
     <PackageReference Include="itext.bouncy-castle-adapter" Version="9.3.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\PdfCropper\PdfCropper.csproj" />
-    <ProjectReference Include="..\..\src\PdfCropper.Cli\PdfCropper.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DimonSmart.PdfCropper\DimonSmart.PdfCropper.csproj" />
+    <ProjectReference Include="..\..\src\DimonSmart.PdfCropper.Cli\DimonSmart.PdfCropper.Cli.csproj" />
   </ItemGroup>
 </Project>

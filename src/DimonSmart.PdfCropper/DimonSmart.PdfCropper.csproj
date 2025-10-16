@@ -9,6 +9,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>DimonSmart.PdfCropper</PackageId>
     <Title>DimonSmart.PdfCropper</Title>
     <Description>A cross-platform .NET library that intelligently trims PDF pages to actual content using content-based or bitmap-based analysis. Supports Windows, Linux, macOS and other .NET-compatible platforms. Perfect for preparing e-books and documents by removing excessive margins and whitespace.</Description>
     <Authors>DimonSmart</Authors>

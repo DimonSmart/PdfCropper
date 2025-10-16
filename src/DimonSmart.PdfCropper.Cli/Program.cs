@@ -9,7 +9,7 @@ try
 {
     Console.OutputEncoding = Encoding.UTF8;
     Console.InputEncoding = Encoding.UTF8;
-    
+
     // On Windows, also try to set the console code page to UTF-8
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {

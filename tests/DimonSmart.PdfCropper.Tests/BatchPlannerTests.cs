@@ -3,7 +3,7 @@ using System.Linq;
 using DimonSmart.PdfCropper.Cli;
 using Xunit;
 
-namespace PdfCropper.Tests;
+namespace DimonSmart.PdfCropper.Tests;
 
 public sealed class BatchPlannerTests : IDisposable
 {

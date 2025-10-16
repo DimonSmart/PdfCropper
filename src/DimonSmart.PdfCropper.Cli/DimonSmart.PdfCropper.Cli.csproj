@@ -10,6 +10,6 @@
     <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="9.0.10" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\PdfCropper\PdfCropper.csproj" />
+    <ProjectReference Include="..\DimonSmart.PdfCropper\DimonSmart.PdfCropper.csproj" />
   </ItemGroup>
 </Project>

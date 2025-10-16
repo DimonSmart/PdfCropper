@@ -222,14 +222,14 @@ public class PdfSmartCropperTests
         // Custom margin should result in a larger crop box (more padding around content)
         Assert.True(cropCustom.GetWidth() > cropDefault.GetWidth());
         Assert.True(cropCustom.GetHeight() > cropDefault.GetHeight());
-        
+
         // The difference should be approximately 2 * (custom margin - default margin) for each dimension
         var expectedWidthDiff = 2 * (customMargin - 0.5f);
         var expectedHeightDiff = 2 * (customMargin - 0.5f);
-        
+
         var actualWidthDiff = cropCustom.GetWidth() - cropDefault.GetWidth();
         var actualHeightDiff = cropCustom.GetHeight() - cropDefault.GetHeight();
-        
+
         Assert.True(Math.Abs(actualWidthDiff - expectedWidthDiff) < 1.0f);
         Assert.True(Math.Abs(actualHeightDiff - expectedHeightDiff) < 1.0f);
     }

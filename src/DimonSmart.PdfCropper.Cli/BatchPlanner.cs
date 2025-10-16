@@ -8,13 +8,13 @@ using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
 
 namespace DimonSmart.PdfCropper.Cli;
 
-internal static class BatchPlanner
+public static class BatchPlanner
 {
     private static readonly char[] GlobSpecialChars = ['*', '?'];
 
     internal static bool ContainsGlobPattern(string path) => !string.IsNullOrEmpty(path) && path.IndexOfAny(GlobSpecialChars) >= 0;
 
-    internal static BatchPlanningResult CreatePlan(string inputPattern, string outputPattern)
+    public static BatchPlanningResult CreatePlan(string inputPattern, string outputPattern)
     {
         if (string.IsNullOrWhiteSpace(inputPattern))
         {
@@ -262,17 +262,17 @@ internal static class BatchPlanner
         : StringComparer.Ordinal;
 }
 
-internal sealed record PlannedFile(string InputPath, string OutputPath);
+public sealed record PlannedFile(string InputPath, string OutputPath);
 
-internal sealed record BatchPlanningResult(IReadOnlyList<PlannedFile> Files, string? ErrorMessage, int ExitCode)
+public sealed record BatchPlanningResult(IReadOnlyList<PlannedFile> Files, string? ErrorMessage, int ExitCode)
 {
-    internal bool Success => ErrorMessage is null;
+    public bool Success => ErrorMessage is null;
 
-    internal static BatchPlanningResult CreateSuccess(IEnumerable<PlannedFile> files)
+    public static BatchPlanningResult CreateSuccess(IEnumerable<PlannedFile> files)
     {
         var list = files as IReadOnlyList<PlannedFile> ?? files.ToList();
         return new BatchPlanningResult(list, null, 0);
     }
 
-    internal static BatchPlanningResult Failure(string message, int exitCode) => new(Array.Empty<PlannedFile>(), message, exitCode);
+    public static BatchPlanningResult Failure(string message, int exitCode) => new(Array.Empty<PlannedFile>(), message, exitCode);
 }
