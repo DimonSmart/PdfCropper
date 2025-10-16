@@ -31,8 +31,6 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="True" PackagePath="/" />
     <None Include="PdfCropperIcon.png" Pack="True" PackagePath="/" />
-    <None Include="..\..\docs\images\before_crop.png" Pack="True" PackagePath="docs/images/" />
-    <None Include="..\..\docs\images\after_crop.png" Pack="True" PackagePath="docs/images/" />
   </ItemGroup>
   
   <ItemGroup>

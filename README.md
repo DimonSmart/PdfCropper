@@ -14,7 +14,7 @@ Here's a visual example of what PdfCropper does - it removes unnecessary margins
 
 | Before Cropping | After Cropping |
 |----------------|----------------|
-| ![Before Crop](docs/images/before_crop.png) | ![After Crop](docs/images/after_crop.png) |
+| ![Before Crop](https://raw.githubusercontent.com/DimonSmart/PdfCropper/main/docs/images/before_crop.png) | ![After Crop](https://raw.githubusercontent.com/DimonSmart/PdfCropper/main/docs/images/after_crop.png) |
 
 *Example pages from "[Pragmatic Type-Level Design](https://graninas.com/pragmatic-type-level-design-book/)" by Alexander Granin*
 
