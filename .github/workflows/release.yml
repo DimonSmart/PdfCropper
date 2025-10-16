@@ -17,7 +17,9 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'
+        dotnet-version: |
+          8.0.x
+          9.0.x
 
     - name: Install dependencies
       run: |
@@ -36,8 +38,11 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore src/PdfCropper/PdfCropper.csproj
 
-    - name: Build and pack
-      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --output ./artifacts
+    - name: Build project
+      run: dotnet build src/PdfCropper/PdfCropper.csproj --configuration Release --no-restore
+
+    - name: Create package
+      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --no-build --output ./artifacts
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2

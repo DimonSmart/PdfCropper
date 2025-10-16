@@ -4,9 +4,21 @@
 [![NuGet Version](https://img.shields.io/nuget/v/DimonSmart.PdfCropper)](https://www.nuget.org/packages/DimonSmart.PdfCropper)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/DimonSmart.PdfCropper)](https://www.nuget.org/packages/DimonSmart.PdfCropper)
 [![License](https://img.shields.io/badge/license-0BSD-blue.svg)](LICENSE)
-[![codecov](https://codecov.io/gh/DimonSmart/PdfCropper/branch/main/graph/badge.svg)](https://codecov.io/gh/DimonSmart/PdfCropper)
+DimonSmart.PdfCropper is a cross-platform .NET library that intelligently trims PDF pages to actual content using two different methods.
+The library exposes a simple API through `PdfSmartCropper.CropAsync`, which accepts a PDF document in memory and returns a new PDF with recalculated `CropBox` and `TrimBox` on every non-empty page.
 
-DimonSmart.PdfCropper is a cross-platform .NET library that intelligently trims PDF pages to actual content using two different methods. The library exposes a simple API through `PdfSmartCropper.CropAsync`, which accepts a PDF document in memory and returns a new PDF with recalculated `CropBox` and `TrimBox` on every non-empty page.
+## Example
+
+Here's a visual example of what PdfCropper does - it removes unnecessary margins and whitespace:
+
+| Before Cropping | After Cropping |
+|----------------|----------------|
+| ![Before Crop](docs/images/before_crop.png) | ![After Crop](docs/images/after_crop.png) |
+
+*Example pages from "[Pragmatic Type-Level Design](https://graninas.com/pragmatic-type-level-design-book/)" by Alexander Granin*
+
+The CLI utility is particularly useful for reading e-books with minimal margins, making them more comfortable to read on tablets and e-readers by removing excessive whitespace around the content.
+
 
 ## Platform Support
 
@@ -31,17 +43,6 @@ Or via Package Manager Console:
 Install-Package DimonSmart.PdfCropper
 ```
 
-## Example
-
-Here's a visual example of what PdfCropper does - it removes unnecessary margins and whitespace:
-
-| Before Cropping | After Cropping |
-|----------------|----------------|
-| ![Before Crop](docs/images/before_crop.png) | ![After Crop](docs/images/after_crop.png) |
-
-*Example pages from "[Pragmatic Type-Level Design](https://graninas.com/pragmatic-type-level-design-book/)" by Alexander Granin*
-
-The CLI utility is particularly useful for reading e-books with minimal margins, making them more comfortable to read on tablets and e-readers by removing excessive whitespace around the content.
 
 ## Features
 

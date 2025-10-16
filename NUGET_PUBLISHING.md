@@ -25,7 +25,6 @@ The repository includes GitHub Actions workflows for automated building, testing
 Configure these secrets in your GitHub repository (Settings → Secrets and variables → Actions):
 
 - `NUGET_API_KEY`: Your NuGet.org API key for publishing packages
-- `CODECOV_TOKEN`: (Optional) Codecov.io token for coverage reporting
 
 See [GitHub Actions Setup](GITHUB_ACTIONS.md) for detailed instructions.
 
