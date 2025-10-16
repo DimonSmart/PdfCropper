@@ -1,6 +1,6 @@
 using System.Runtime.Serialization;
 
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 [Serializable]
 public class PdfCropException : Exception

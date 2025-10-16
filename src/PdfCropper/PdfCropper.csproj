@@ -1,10 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <Configuration>Release</Configuration>
+    <IsPackable>true</IsPackable>
+    <OutputType>Library</OutputType>
+    <TargetFrameworks>net6.0;net8.0;net9.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Title>DimonSmart.PdfCropper</Title>
+    <Description>A cross-platform .NET library that intelligently trims PDF pages to actual content using content-based or bitmap-based analysis. Supports Windows, Linux, macOS and other .NET-compatible platforms. Perfect for preparing e-books and documents by removing excessive margins and whitespace.</Description>
+    <Authors>DimonSmart</Authors>
+    <Company>DimonSmart</Company>
+    <PackageProjectUrl>https://github.com/DimonSmart/PdfCropper</PackageProjectUrl>
+    <PackageIcon>PdfCropperIcon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/DimonSmart/PdfCropper</RepositoryUrl>
+    <PackageTags>pdf;pdf cropper;pdf trimmer;pdf margin removal;ebook;ebook preparation;document processing;pdf processing;content analysis;itext;pdf manipulation;cross-platform;windows;linux;macos;unix</PackageTags>
+    <PackageLicenseExpression>0BSD</PackageLicenseExpression>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <PackageVersion>1.0.1</PackageVersion>
+    <Version>1.0.1</Version>
+    <PackageReleaseNotes>v1.0.1: Added cross-platform support (Windows, Linux, macOS), updated package icon, improved multi-target framework support (.NET 6.0, 8.0, 9.0)</PackageReleaseNotes>
+    <SupportedOSPlatformVersion>10.0</SupportedOSPlatformVersion>
   </PropertyGroup>
+  
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="True" PackagePath="/" />
+    <None Include="PdfCropperIcon.png" Pack="True" PackagePath="/" />
+  </ItemGroup>
+  
   <ItemGroup>
     <PackageReference Include="itext" Version="9.3.0" />
     <PackageReference Include="itext.bouncy-castle-adapter" Version="9.3.0" />

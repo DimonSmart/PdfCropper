@@ -140,6 +140,24 @@ PdfCropper.Cli input.pdf output.pdf
 PdfCropper.Cli input.pdf output.pdf -m 1
 ```
 
+### Custom Safety Margin
+
+```bash
+# Default margin (0.5 points)
+PdfCropper.Cli input.pdf output.pdf
+
+# No margin (crop tight to content)
+PdfCropper.Cli input.pdf output.pdf --margin 0
+
+# Small margin (1 point)
+PdfCropper.Cli input.pdf output.pdf --margin 1.0
+
+# Large margin (5 points)
+PdfCropper.Cli input.pdf output.pdf --margin 5.0
+```
+
+**Note:** Margin is specified in points (1 point = 1/72 inch ≈ 0.35 mm)
+
 ### Verbose Logging
 
 ```bash
@@ -162,6 +180,15 @@ PdfCropper.Cli input.pdf output.pdf -v
 ```bash
 # BitmapBased method with verbose logging
 PdfCropper.Cli input.pdf output.pdf -m 1 -v
+
+# ContentBased with custom margin and verbose logging
+PdfCropper.Cli input.pdf output.pdf --margin 2.5 -v
+
+# BitmapBased with custom margin, excluding edge content
+PdfCropper.Cli input.pdf output.pdf -m 1 --margin 3.0
+
+# ContentBased excluding edge content with large margin
+PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 -v
 ```
 
 ## Logger Output Examples

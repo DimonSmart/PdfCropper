@@ -1,0 +1,85 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build and Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        dotnet-version: ['6.0.x', '8.0.x', '9.0.x']
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET ${{ matrix.dotnet-version }}
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ matrix.dotnet-version }}
+
+    - name: Install dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1 libgdiplus libc6-dev
+
+    - name: Restore dependencies
+      run: dotnet restore PdfCropper.sln
+
+    - name: Build solution
+      run: dotnet build PdfCropper.sln --configuration Release --no-restore
+
+    - name: Run tests
+      run: dotnet test PdfCropper.sln --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+
+    - name: Upload coverage reports to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: '**/coverage.cobertura.xml'
+        fail_ci_if_error: false
+
+  package:
+    name: Create NuGet Package
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1 libgdiplus libc6-dev
+
+    - name: Restore dependencies
+      run: dotnet restore src/PdfCropper/PdfCropper.csproj
+
+    - name: Build and pack
+      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --output ./artifacts
+
+    - name: Upload NuGet package as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-package
+        path: ./artifacts/*.nupkg
+
+    - name: Publish to NuGet (on tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

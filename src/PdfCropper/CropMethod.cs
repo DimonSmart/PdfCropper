@@ -1,4 +1,4 @@
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 /// <summary>
 /// Specifies the method to use for cropping PDF pages.

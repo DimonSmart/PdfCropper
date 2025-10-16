@@ -1,4 +1,4 @@
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 /// <summary>
 /// Represents configuration for PDF cropping operations.
@@ -12,10 +12,12 @@ public readonly struct CropSettings
     /// <param name="excludeEdgeTouchingObjects">
     /// Whether to ignore content that touches current page boundaries when analyzing content bounds.
     /// </param>
-    public CropSettings(CropMethod method, bool excludeEdgeTouchingObjects = false)
+    /// <param name="margin">Safety margin in points to add around detected content bounds.</param>
+    public CropSettings(CropMethod method, bool excludeEdgeTouchingObjects = false, float margin = 0.5f)
     {
         Method = method;
         ExcludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
+        Margin = margin;
     }
 
     /// <summary>
@@ -27,6 +29,11 @@ public readonly struct CropSettings
     /// Gets a value indicating whether edge-touching content should be ignored during content analysis.
     /// </summary>
     public bool ExcludeEdgeTouchingObjects { get; }
+
+    /// <summary>
+    /// Gets the safety margin in points to add around detected content bounds.
+    /// </summary>
+    public float Margin { get; }
 
     /// <summary>
     /// Gets the default cropping settings.

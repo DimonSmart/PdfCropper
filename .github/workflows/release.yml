@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release and Publish NuGet
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1 libgdiplus libc6-dev
+
+    - name: Extract version from tag
+      id: extract_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Update project version
+      run: |
+        sed -i "s/<PackageVersion>.*<\/PackageVersion>/<PackageVersion>${{ steps.extract_version.outputs.VERSION }}<\/PackageVersion>/" src/PdfCropper/PdfCropper.csproj
+        sed -i "s/<Version>.*<\/Version>/<Version>${{ steps.extract_version.outputs.VERSION }}<\/Version>/" src/PdfCropper/PdfCropper.csproj
+
+    - name: Restore dependencies
+      run: dotnet restore src/PdfCropper/PdfCropper.csproj
+
+    - name: Build and pack
+      run: dotnet pack src/PdfCropper/PdfCropper.csproj --configuration Release --output ./artifacts
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ./artifacts/*.nupkg
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Publish to NuGet
+      run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace PdfCropper.Cli;
+namespace DimonSmart.PdfCropper.Cli;
 
 /// <summary>
 /// Simple console logger implementation using standard Microsoft.Extensions.Logging abstractions.

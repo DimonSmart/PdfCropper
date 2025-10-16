@@ -1,4 +1,4 @@
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 /// <summary>
 /// A null logger implementation that does nothing.

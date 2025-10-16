@@ -6,8 +6,9 @@ using iText.Kernel.Pdf.Canvas;
 using iText.Layout;
 using iText.Layout.Element;
 using Xunit;
+using DimonSmart.PdfCropper;
 
-namespace PdfCropper.Tests;
+namespace DimonSmart.PdfCropper.Tests;
 
 public class PdfSmartCropperTests
 {
@@ -193,6 +194,44 @@ public class PdfSmartCropperTests
         Assert.True(horizontalCrop.GetTop() >= horizontalY + halfWidth);
         Assert.True(horizontalCrop.GetLeft() <= horizontalStartX);
         Assert.True(horizontalCrop.GetRight() >= horizontalEndX);
+    }
+
+    [Fact]
+    public async Task CropAsync_WithCustomMargin_AppliesCorrectMargin()
+    {
+        var customMargin = 5.0f;
+        var input = CreatePdf(pdf =>
+        {
+            using var document = new Document(pdf, PageSize.A4);
+            document.SetMargins(100, 100, 100, 100);
+            document.Add(new Paragraph("Test content with custom margin").SetFontSize(12));
+        });
+
+        var settingsDefault = new CropSettings(CropMethod.ContentBased);
+        var settingsCustom = new CropSettings(CropMethod.ContentBased, margin: customMargin);
+
+        var croppedDefault = await PdfSmartCropper.CropAsync(input, settingsDefault);
+        var croppedCustom = await PdfSmartCropper.CropAsync(input, settingsCustom);
+
+        using var resultDefault = new PdfDocument(new PdfReader(new MemoryStream(croppedDefault)));
+        using var resultCustom = new PdfDocument(new PdfReader(new MemoryStream(croppedCustom)));
+
+        var cropDefault = resultDefault.GetPage(1).GetCropBox();
+        var cropCustom = resultCustom.GetPage(1).GetCropBox();
+
+        // Custom margin should result in a larger crop box (more padding around content)
+        Assert.True(cropCustom.GetWidth() > cropDefault.GetWidth());
+        Assert.True(cropCustom.GetHeight() > cropDefault.GetHeight());
+        
+        // The difference should be approximately 2 * (custom margin - default margin) for each dimension
+        var expectedWidthDiff = 2 * (customMargin - 0.5f);
+        var expectedHeightDiff = 2 * (customMargin - 0.5f);
+        
+        var actualWidthDiff = cropCustom.GetWidth() - cropDefault.GetWidth();
+        var actualHeightDiff = cropCustom.GetHeight() - cropDefault.GetHeight();
+        
+        Assert.True(Math.Abs(actualWidthDiff - expectedWidthDiff) < 1.0f);
+        Assert.True(Math.Abs(actualHeightDiff - expectedHeightDiff) < 1.0f);
     }
 
     [Fact]

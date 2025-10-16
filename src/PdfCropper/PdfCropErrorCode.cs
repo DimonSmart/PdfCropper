@@ -1,4 +1,4 @@
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 public enum PdfCropErrorCode
 {

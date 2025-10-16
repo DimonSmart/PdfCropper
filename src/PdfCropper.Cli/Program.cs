@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
-using PdfCropper;
-using PdfCropper.Cli;
+using DimonSmart.PdfCropper;
+using DimonSmart.PdfCropper.Cli;
 
 // Set console encoding to UTF-8 to properly display Unicode characters
 try
@@ -93,6 +93,25 @@ static async Task<int> RunAsync(string[] args)
             continue;
         }
 
+        if (args[i] == "--margin")
+        {
+            if (i + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("Error: --margin requires a numeric value (margin in points)");
+                return 1;
+            }
+
+            if (!float.TryParse(args[i + 1], out var margin) || margin < 0)
+            {
+                Console.Error.WriteLine("Error: margin must be a non-negative number");
+                return 1;
+            }
+
+            settings = new CropSettings(settings.Method, settings.ExcludeEdgeTouchingObjects, margin);
+            i++;
+            continue;
+        }
+
         Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
         return 1;
     }
@@ -153,6 +172,7 @@ static void ShowUsage()
     Console.WriteLine("                        00 = ContentBased with edge-touching content included");
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
+    Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
     Console.WriteLine("  -l, --log-level <lvl> Logging level:");
     Console.WriteLine("                        none = no logging (default)");
@@ -165,6 +185,8 @@ static void ShowUsage()
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 1 -v");
+    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --margin 2.0");
+    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
 }
 
 static bool TryParseMethod(string value, out CropSettings settings)

@@ -8,14 +8,13 @@ using iText.Kernel.Pdf.Canvas.Parser.Listener;
 using PDFtoImage;
 using SkiaSharp;
 
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 /// <summary>
 /// Provides methods for intelligently cropping PDF documents to actual content bounds.
 /// </summary>
 public static class PdfSmartCropper
 {
-    private const float SafetyMargin = 0.5f;
 
     /// <summary>
     /// Crops a PDF document using the specified method.
@@ -100,8 +99,8 @@ public static class PdfSmartCropper
 
                 var cropRectangle = settings.Method switch
                 {
-                    CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, settings.ExcludeEdgeTouchingObjects, ct),
-                    CropMethod.BitmapBased => CropPageBitmapBased(inputPdf, pageIndex, pageSize, logger, ct),
+                    CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, settings.ExcludeEdgeTouchingObjects, settings.Margin, ct),
+                    CropMethod.BitmapBased => CropPageBitmapBased(inputPdf, pageIndex, pageSize, logger, settings.Margin, ct),
                     _ => throw new ArgumentOutOfRangeException(nameof(settings.Method), settings.Method, "Unknown crop method")
                 };
 
@@ -167,7 +166,7 @@ public static class PdfSmartCropper
         }
     }
 
-    private static Rectangle? CropPageContentBased(PdfPage page, IPdfCropLogger logger, int pageIndex, bool excludeEdgeTouchingObjects, CancellationToken ct)
+    private static Rectangle? CropPageContentBased(PdfPage page, IPdfCropLogger logger, int pageIndex, bool excludeEdgeTouchingObjects, float margin, CancellationToken ct)
     {
         var collector = new ContentBoundingBoxCollector(page.GetPageSize(), excludeEdgeTouchingObjects, ct);
         var processor = new PdfCanvasProcessor(collector);
@@ -181,10 +180,10 @@ public static class PdfSmartCropper
 
         logger.LogInfo($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})");
 
-        return bounds.Value.ToRectangle(page.GetPageSize(), SafetyMargin);
+        return bounds.Value.ToRectangle(page.GetPageSize(), margin);
     }
 
-    private static Rectangle? CropPageBitmapBased(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, CancellationToken ct)
+    private static Rectangle? CropPageBitmapBased(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, float margin, CancellationToken ct)
     {
         const byte threshold = 250;
 
@@ -208,10 +207,10 @@ public static class PdfSmartCropper
             var scaleX = pageSize.GetWidth() / bitmap.Width;
             var scaleY = pageSize.GetHeight() / bitmap.Height;
 
-            var left = minX * scaleX - SafetyMargin;
-            var bottom = pageSize.GetHeight() - (maxY * scaleY) - SafetyMargin;
-            var right = maxX * scaleX + SafetyMargin;
-            var top = pageSize.GetHeight() - (minY * scaleY) + SafetyMargin;
+            var left = minX * scaleX - margin;
+            var bottom = pageSize.GetHeight() - (maxY * scaleY) - margin;
+            var right = maxX * scaleX + margin;
+            var top = pageSize.GetHeight() - (minY * scaleY) + margin;
 
             left = Math.Max(pageSize.GetLeft(), left);
             bottom = Math.Max(pageSize.GetBottom(), bottom);

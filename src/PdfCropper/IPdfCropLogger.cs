@@ -1,4 +1,4 @@
-namespace PdfCropper;
+namespace DimonSmart.PdfCropper;
 
 /// <summary>
 /// Logger interface for PDF cropping operations.
