@@ -200,7 +200,7 @@ public class PdfSmartCropperTests
     {
         var input = CreatePdf(pdf =>
         {
-            for (int i = 0; i < 1024; i++)
+            for (var i = 0; i < 1024; i++)
             {
                 var page = pdf.AddNewPage(PageSize.A4);
                 var canvas = new PdfCanvas(page);

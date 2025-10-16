@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using PdfCropper;
 using PdfCropper.Cli;
 
@@ -16,11 +17,11 @@ static async Task<int> RunAsync(string[] args)
     var method = CropMethod.ContentBased;
     var logLevel = LogLevel.None;
 
-    for (int i = 2; i < args.Length; i++)
+    for (var i = 2; i < args.Length; i++)
     {
         if (args[i] == "-v" || args[i] == "--verbose")
         {
-            logLevel = LogLevel.Info;
+            logLevel = LogLevel.Information;
             continue;
         }
 
@@ -28,18 +29,29 @@ static async Task<int> RunAsync(string[] args)
         {
             if (i + 1 >= args.Length)
             {
-                Console.Error.WriteLine("Error: --log-level requires a value (none or info)");
+                Console.Error.WriteLine("Error: --log-level requires a value (none, debug, trace, information, warning, error)");
                 return 1;
             }
 
-            var levelValue = args[i + 1].ToLowerInvariant();
-            if (levelValue != "none" && levelValue != "info")
+            try
             {
-                Console.Error.WriteLine($"Error: Invalid log level '{args[i + 1]}'. Use 'none' or 'info'.");
+                var levelValue = args[i + 1].ToLowerInvariant();
+                logLevel = levelValue switch
+                {
+                    "none" => LogLevel.None,
+                    "info" or "information" => LogLevel.Information,
+                    "warning" or "warn" => LogLevel.Warning,
+                    "error" => LogLevel.Error,
+                    "debug" => LogLevel.Debug,
+                    "trace" => LogLevel.Trace,
+                    _ => throw new ArgumentException($"Invalid log level '{args[i + 1]}'. Valid values: none, debug, trace, information, warning, error.")
+                };
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
                 return 1;
             }
-
-            logLevel = levelValue == "info" ? LogLevel.Info : LogLevel.None;
             i++;
             continue;
         }
@@ -51,13 +63,13 @@ static async Task<int> RunAsync(string[] args)
                 Console.Error.WriteLine("Error: --method requires a value (0 or 1)");
                 return 1;
             }
-            
-            if (!int.TryParse(args[i + 1], out int methodValue) || (methodValue != 0 && methodValue != 1))
+
+            if (!int.TryParse(args[i + 1], out var methodValue) || (methodValue != 0 && methodValue != 1))
             {
                 Console.Error.WriteLine("Error: method must be 0 (ContentBased) or 1 (BitmapBased)");
                 return 1;
             }
-            
+
             method = (CropMethod)methodValue;
             i++;
             continue;
@@ -79,7 +91,7 @@ static async Task<int> RunAsync(string[] args)
     {
         logger.LogInfo($"Reading input file: {inputPath}");
         var inputBytes = await File.ReadAllBytesAsync(inputPath);
-        
+
         logger.LogInfo($"Cropping PDF using {method} method...");
         var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, method, logger);
 
@@ -91,7 +103,7 @@ static async Task<int> RunAsync(string[] args)
 
         logger.LogInfo($"Writing output file: {outputPath}");
         await File.WriteAllBytesAsync(outputPath, croppedBytes);
-        
+
         Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
         return 0;
     }
@@ -116,9 +128,14 @@ static void ShowUsage()
     Console.WriteLine("  -m, --method <0|1>    Cropping method:");
     Console.WriteLine("                        0 = ContentBased (default, analyzes PDF content)");
     Console.WriteLine("                        1 = BitmapBased (renders to image, slower but more accurate)");
-    Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level info)");
-    Console.WriteLine("  -l, --log-level <lvl> Logging level: none (default) or info");
-    Console.WriteLine("                        info = per-page sizes and timing details");
+    Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
+    Console.WriteLine("  -l, --log-level <lvl> Logging level:");
+    Console.WriteLine("                        none = no logging (default)");
+    Console.WriteLine("                        information = detailed processing info");
+    Console.WriteLine("                        warning = warnings and errors only");
+    Console.WriteLine("                        error = errors only");
+    Console.WriteLine("                        debug = debug information");
+    Console.WriteLine("                        trace = very detailed tracing");
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");

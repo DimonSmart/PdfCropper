@@ -26,8 +26,8 @@ public static class PdfSmartCropper
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
     public static Task<byte[]> CropAsync(
-        byte[] inputPdf, 
-        CropMethod method = CropMethod.ContentBased, 
+        byte[] inputPdf,
+        CropMethod method = CropMethod.ContentBased,
         IPdfCropLogger? logger = null,
         CancellationToken ct = default)
     {
@@ -56,10 +56,10 @@ public static class PdfSmartCropper
             using var writer = new PdfWriter(outputStream, new WriterProperties());
             using var pdfDocument = new PdfDocument(reader, writer);
 
-            int pageCount = pdfDocument.GetNumberOfPages();
+            var pageCount = pdfDocument.GetNumberOfPages();
             logger.LogInfo($"Processing PDF with {pageCount} page(s) using {method} method");
 
-            for (int pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+            for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
             {
                 ct.ThrowIfCancellationRequested();
                 var page = pdfDocument.GetPage(pageIndex);
@@ -76,7 +76,7 @@ public static class PdfSmartCropper
                     continue;
                 }
 
-                Rectangle? cropRectangle = method switch
+                var cropRectangle = method switch
                 {
                     CropMethod.ContentBased => CropPageContentBased(page, logger, pageIndex, ct),
                     CropMethod.BitmapBased => CropPageBitmapBased(inputPdf, pageIndex, pageSize, logger, ct),
@@ -171,7 +171,7 @@ public static class PdfSmartCropper
             logger.LogInfo($"Page {pageIndex}: Rendering to bitmap");
 
             using var bitmap = Conversion.ToImage(inputPdf, page: pageIndex - 1);
-            
+
             logger.LogInfo($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels");
 
             var (minX, minY, maxX, maxY) = FindContentBoundsInBitmap(bitmap, threshold, ct);
@@ -217,28 +217,28 @@ public static class PdfSmartCropper
 
     private static (int minX, int minY, int maxX, int maxY) FindContentBoundsInBitmap(SKBitmap bitmap, byte threshold, CancellationToken ct)
     {
-        int minX = bitmap.Width;
-        int minY = bitmap.Height;
-        int maxX = 0;
-        int maxY = 0;
+        var minX = bitmap.Width;
+        var minY = bitmap.Height;
+        var maxX = 0;
+        var maxY = 0;
 
         var pixels = bitmap.Bytes;
         var bytesPerPixel = bitmap.BytesPerPixel;
 
-        for (int y = 0; y < bitmap.Height; y++)
+        for (var y = 0; y < bitmap.Height; y++)
         {
             ct.ThrowIfCancellationRequested();
 
-            for (int x = 0; x < bitmap.Width; x++)
+            for (var x = 0; x < bitmap.Width; x++)
             {
                 var offset = (y * bitmap.RowBytes) + (x * bytesPerPixel);
-                
+
                 var b = pixels[offset];
                 var g = pixels[offset + 1];
                 var r = pixels[offset + 2];
-                
+
                 var luminance = (byte)(0.299 * r + 0.587 * g + 0.114 * b);
-                
+
                 if (luminance < threshold)
                 {
                     if (x < minX) minX = x;
@@ -273,23 +273,15 @@ public static class PdfSmartCropper
             : $"{elapsed.TotalSeconds:F2} s";
     }
 
-    private readonly struct BoundingBox
+    private readonly struct BoundingBox(double minX, double minY, double maxX, double maxY)
     {
-        public BoundingBox(double minX, double minY, double maxX, double maxY)
-        {
-            MinX = minX;
-            MinY = minY;
-            MaxX = maxX;
-            MaxY = maxY;
-        }
+        public double MinX { get; } = minX;
 
-        public double MinX { get; }
+        public double MinY { get; } = minY;
 
-        public double MinY { get; }
+        public double MaxX { get; } = maxX;
 
-        public double MaxX { get; }
-
-        public double MaxY { get; }
+        public double MaxY { get; } = maxY;
 
         public Rectangle? ToRectangle(Rectangle pageBox, float margin)
         {
@@ -310,7 +302,7 @@ public static class PdfSmartCropper
         }
     }
 
-    private sealed class ContentBoundingBoxCollector : IEventListener
+    private sealed class ContentBoundingBoxCollector(CancellationToken ct) : IEventListener
     {
         private static readonly ICollection<EventType> SupportedEvents = new[]
         {
@@ -318,17 +310,10 @@ public static class PdfSmartCropper
             EventType.RENDER_IMAGE,
             EventType.RENDER_PATH
         };
-
-        private readonly CancellationToken _ct;
         private double? _minX;
         private double? _minY;
         private double? _maxX;
         private double? _maxY;
-
-        public ContentBoundingBoxCollector(CancellationToken ct)
-        {
-            _ct = ct;
-        }
 
         public BoundingBox? Bounds => _minX.HasValue && _minY.HasValue && _maxX.HasValue && _maxY.HasValue
             ? new BoundingBox(_minX.Value, _minY.Value, _maxX.Value, _maxY.Value)
@@ -336,7 +321,7 @@ public static class PdfSmartCropper
 
         public void EventOccurred(IEventData data, EventType type)
         {
-            _ct.ThrowIfCancellationRequested();
+            ct.ThrowIfCancellationRequested();
 
             switch (type)
             {

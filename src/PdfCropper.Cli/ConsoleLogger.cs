@@ -1,35 +1,22 @@
-using PdfCropper;
+using Microsoft.Extensions.Logging;
 
 namespace PdfCropper.Cli;
 
 /// <summary>
-/// Simple console logger implementation.
+/// Simple console logger implementation using standard Microsoft.Extensions.Logging abstractions.
 /// </summary>
-internal enum LogLevel
+internal sealed class ConsoleLogger(LogLevel minimumLevel) : IPdfCropLogger
 {
-    None,
-    Info
-}
-
-internal sealed class ConsoleLogger : IPdfCropLogger
-{
-    private readonly LogLevel _level;
-
-    public ConsoleLogger(LogLevel level)
-    {
-        _level = level;
-    }
-
     public void LogInfo(string message)
     {
-        if (_level < LogLevel.Info) return;
-        
+        if (!IsEnabled(LogLevel.Information)) return;
+
         Console.WriteLine($"[INFO] {message}");
     }
 
     public void LogWarning(string message)
     {
-        if (_level == LogLevel.None) return;
+        if (!IsEnabled(LogLevel.Warning)) return;
 
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Yellow;
@@ -39,9 +26,16 @@ internal sealed class ConsoleLogger : IPdfCropLogger
 
     public void LogError(string message)
     {
+        if (!IsEnabled(LogLevel.Error)) return;
+
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Red;
         Console.Error.WriteLine($"[ERROR] {message}");
         Console.ForegroundColor = oldColor;
+    }
+
+    private bool IsEnabled(LogLevel logLevel)
+    {
+        return logLevel >= minimumLevel;
     }
 }
