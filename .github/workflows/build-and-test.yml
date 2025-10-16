@@ -37,16 +37,31 @@ jobs:
     - name: Build solution
       run: dotnet build PdfCropper.sln --configuration Release --no-restore
 
-    - name: Run tests
-      run: dotnet test PdfCropper.sln --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"
+    - name: Run tests with coverage
+      run: dotnet test PdfCropper.sln --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory:"./test-results"
+
+    - name: Install ReportGenerator tool
+      if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+      run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+    - name: Generate coverage report
+      if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+      run: reportgenerator -reports:"./test-results/**/coverage.cobertura.xml" -targetdir:"./coverage-report" -reporttypes:"Html;Cobertura"
 
     - name: Upload coverage reports to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        files: '**/coverage.cobertura.xml'
+        files: './test-results/**/coverage.cobertura.xml'
         fail_ci_if_error: false
+
+    - name: Upload coverage report as artifact
+      if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: ./coverage-report/
 
   package:
     name: Create NuGet Package
