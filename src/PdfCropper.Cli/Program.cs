@@ -6,7 +6,7 @@ return await RunAsync(args);
 static async Task<int> RunAsync(string[] args)
 {
     // Parse arguments
-    if (args.Length < 2 || args.Length > 4)
+    if (args.Length < 2)
     {
         ShowUsage();
         return 1;
@@ -15,14 +15,38 @@ static async Task<int> RunAsync(string[] args)
     var inputPath = args[0];
     var outputPath = args[1];
     var method = CropMethod.ContentBased;
-    var verbose = false;
+    var logLevel = LogLevel.None;
 
     // Parse optional arguments
     for (int i = 2; i < args.Length; i++)
     {
         if (args[i] == "-v" || args[i] == "--verbose")
         {
-            verbose = true;
+            logLevel = LogLevel.Info;
+        }
+        else if (args[i] == "-l" || args[i] == "--log-level")
+        {
+            if (i + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("Error: --log-level requires a value (none or info)");
+                return 1;
+            }
+
+            var levelValue = args[i + 1].ToLowerInvariant();
+            logLevel = levelValue switch
+            {
+                "none" => LogLevel.None,
+                "info" => LogLevel.Info,
+                _ => LogLevel.None
+            };
+
+            if (levelValue != "none" && levelValue != "info")
+            {
+                Console.Error.WriteLine($"Error: Invalid log level '{args[i + 1]}'. Use 'none' or 'info'.");
+                return 1;
+            }
+
+            i++;
         }
         else if (args[i] == "-m" || args[i] == "--method")
         {
@@ -41,6 +65,11 @@ static async Task<int> RunAsync(string[] args)
             method = (CropMethod)methodValue;
             i++; // Skip the next argument
         }
+        else
+        {
+            Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
+            return 1;
+        }
     }
 
     if (!File.Exists(inputPath))
@@ -49,7 +78,7 @@ static async Task<int> RunAsync(string[] args)
         return 2;
     }
 
-    var logger = new ConsoleLogger(verbose);
+    var logger = new ConsoleLogger(logLevel);
 
     try
     {
@@ -79,10 +108,7 @@ static async Task<int> RunAsync(string[] args)
     catch (Exception ex)
     {
         logger.LogError($"Unexpected error: {ex.Message}");
-        if (verbose)
-        {
-            logger.LogError($"Stack trace: {ex.StackTrace}");
-        }
+        logger.LogError($"Stack trace: {ex.StackTrace}");
         return 99;
     }
 }
@@ -95,7 +121,9 @@ static void ShowUsage()
     Console.WriteLine("  -m, --method <0|1>    Cropping method:");
     Console.WriteLine("                        0 = ContentBased (default, analyzes PDF content)");
     Console.WriteLine("                        1 = BitmapBased (renders to image, slower but more accurate)");
-    Console.WriteLine("  -v, --verbose         Enable verbose logging");
+    Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level info)");
+    Console.WriteLine("  -l, --log-level <lvl> Logging level: none (default) or info");
+    Console.WriteLine("                        info = per-page sizes and timing details");
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
