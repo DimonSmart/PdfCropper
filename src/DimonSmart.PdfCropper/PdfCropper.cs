@@ -1,12 +1,9 @@
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace DimonSmart.PdfCropper;
 
 /// <summary>
-/// Default implementation of <see cref="IPdfCropper"/> based on <see cref="PdfSmartCropper"/>.
+/// Default implementation of <see cref="IPdfCropper"/> for PDF cropping operations.
 /// </summary>
-public sealed class PdfSmartCropperService : IPdfCropper
+public sealed class PdfCropper : IPdfCropper
 {
     /// <inheritdoc />
     public Task<byte[]> CropAsync(
