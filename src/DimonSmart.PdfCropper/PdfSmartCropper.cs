@@ -74,6 +74,21 @@ public static class PdfSmartCropper
         }
 
         logger ??= NullLogger.Instance;
+        logger.LogInfo($"Starting PDF processing with optimization settings:");
+        
+        if (optimizationSettings.CompressionLevel.HasValue)
+        {
+            logger.LogInfo($"  Compression level: {optimizationSettings.CompressionLevel.Value}");
+        }
+        else
+        {
+            logger.LogInfo($"  Compression level: Default");
+        }
+        
+        logger.LogInfo($"  Full compression: {optimizationSettings.EnableFullCompression}");
+        logger.LogInfo($"  Smart mode: {optimizationSettings.EnableSmartMode}");
+        logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
+        
         return Task.Run(() => CropInternal(inputPdf, cropSettings, optimizationSettings, logger, ct), ct);
     }
 
@@ -87,6 +102,7 @@ public static class PdfSmartCropper
         ct.ThrowIfCancellationRequested();
 
         var totalStopwatch = Stopwatch.StartNew();
+        logger.LogInfo($"Input PDF size: {inputPdf.Length:N0} bytes");
 
         try
         {
@@ -95,7 +111,7 @@ public static class PdfSmartCropper
             var readerProps = new ReaderProperties();
 
             using var reader = new PdfReader(inputStream, readerProps);
-            var writerProps = CreateWriterProperties(optimizationSettings);
+            var writerProps = CreateWriterProperties(optimizationSettings, logger);
             using var writer = new PdfWriter(outputStream, writerProps);
             if (optimizationSettings.EnableSmartMode)
             {
@@ -203,9 +219,28 @@ public static class PdfSmartCropper
             logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
 
             var resultBytes = outputStream.ToArray();
+            logger.LogInfo($"Output PDF size before final optimization: {resultBytes.Length:N0} bytes");
+            
             if (optimizationSettings.RemoveXmpMetadata)
             {
                 resultBytes = PdfXmpCleaner.RemoveXmpMetadata(resultBytes, optimizationSettings);
+                logger.LogInfo($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes");
+            }
+
+            var sizeReduction = inputPdf.Length - resultBytes.Length;
+            var percentReduction = inputPdf.Length > 0 ? (double)sizeReduction / inputPdf.Length * 100 : 0;
+            
+            if (sizeReduction > 0)
+            {
+                logger.LogInfo($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)");
+            }
+            else if (sizeReduction < 0)
+            {
+                logger.LogInfo($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)");
+            }
+            else
+            {
+                logger.LogInfo("No size change");
             }
 
             return resultBytes;
@@ -270,18 +305,25 @@ public static class PdfSmartCropper
             : $"{elapsed.TotalSeconds:F2} s";
     }
 
-    internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings)
+    internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings, IPdfCropLogger? logger = null)
     {
         var props = new WriterProperties();
 
         if (optimizationSettings.CompressionLevel.HasValue)
         {
-            props.SetCompressionLevel(optimizationSettings.CompressionLevel.Value);
+            var level = optimizationSettings.CompressionLevel.Value;
+            props.SetCompressionLevel(level);
+            logger?.LogInfo($"Setting compression level to: {level}");
+        }
+        else
+        {
+            logger?.LogInfo("Using default compression level");
         }
 
         if (optimizationSettings.EnableFullCompression)
         {
             props.SetFullCompressionMode(true);
+            logger?.LogInfo("Full compression mode enabled");
         }
 
         return props;

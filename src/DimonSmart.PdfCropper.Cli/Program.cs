@@ -109,6 +109,7 @@ static void ShowUsage()
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
     Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
     Console.WriteLine("  --compression-level <level>  Deflate compression level (NO_COMPRESSION, DEFAULT_COMPRESSION, BEST_SPEED, BEST_COMPRESSION)");
+    Console.WriteLine("                        Note: For maximum size reduction, combine with --full-compression, --smart, --remove-unused");
     Console.WriteLine("  --full-compression    Enable compact cross-reference compression");
     Console.WriteLine("  --smart               Enable smart mode resource deduplication");
     Console.WriteLine("  --remove-unused       Remove unused PDF objects before saving");
@@ -135,6 +136,7 @@ static void ShowUsage()
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --margin 2.0");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
     Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
+    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");
 }
 
 static async Task<int> CropFileAsync(

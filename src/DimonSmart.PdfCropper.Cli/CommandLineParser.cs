@@ -146,9 +146,10 @@ internal static class CommandLineParser
                         return CommandLineParseResult.Failure("--compression-level requires a value");
                     }
 
-                    if (!TryParseCompressionLevel(args[++i], out var parsedLevel))
+                    var compressionArg = args[++i];
+                    if (!TryParseCompressionLevel(compressionArg, out var parsedLevel))
                     {
-                        return CommandLineParseResult.Failure($"invalid compression level. Use {SupportedCompressionLevels}.");
+                        return CommandLineParseResult.Failure($"invalid compression level '{compressionArg}'. Use {SupportedCompressionLevels}.");
                     }
 
                     compressionLevel = parsedLevel;
