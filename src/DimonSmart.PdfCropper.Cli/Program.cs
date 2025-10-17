@@ -102,6 +102,8 @@ static void ShowUsage()
     Console.WriteLine("Usage: PdfCropper.Cli <input.pdf> <output.pdf> [options]");
     Console.WriteLine();
     Console.WriteLine("Options:");
+    Console.WriteLine("  --preset <name>      Apply a preset of crop and optimization options");
+    Console.WriteLine($"                        Available: {string.Join(", ", PdfCropProfiles.Keys)}");
     Console.WriteLine("  -m, --method <mode>   Cropping mode:");
     Console.WriteLine("                        0  = ContentBased (default, analyzes PDF content)");
     Console.WriteLine("                        00 = ContentBased with edge-touching content included");
@@ -133,8 +135,10 @@ static void ShowUsage()
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
+    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --preset ebook");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 1 -v");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --margin 2.0");
+    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --preset aggressive -v");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
     Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");
