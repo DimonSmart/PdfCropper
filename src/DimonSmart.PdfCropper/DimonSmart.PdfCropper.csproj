@@ -22,8 +22,8 @@
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
-    <PackageVersion>1.0.7</PackageVersion>
-    <Version>1.0.7</Version>
+    <PackageVersion>1.0.8</PackageVersion>
+    <Version>1.0.8</Version>
     <SupportedOSPlatformVersion>10.0</SupportedOSPlatformVersion>
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
@@ -34,8 +34,8 @@
   </ItemGroup>
   
   <ItemGroup>
-    <PackageReference Include="itext" Version="9.3.0" />
-    <PackageReference Include="itext.bouncy-castle-adapter" Version="9.3.0" />
-    <PackageReference Include="PDFtoImage" Version="5.1.1" />
+    <PackageReference Include="itext" Version="8.0.0" />
+    <PackageReference Include="itext.bouncy-castle-adapter" Version="8.0.0" />
+    <PackageReference Include="PDFtoImage" Version="4.0.0" />
   </ItemGroup>
 </Project>
