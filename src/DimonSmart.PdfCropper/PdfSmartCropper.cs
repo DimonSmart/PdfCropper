@@ -84,11 +84,20 @@ public static class PdfSmartCropper
         {
             logger.LogInfo($"  Compression level: Default");
         }
-        
+
+        if (optimizationSettings.TargetPdfVersion != null)
+        {
+            logger.LogInfo($"  Target PDF version: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}");
+        }
+        else
+        {
+            logger.LogInfo("  Target PDF version: Original");
+        }
+
         logger.LogInfo($"  Full compression: {optimizationSettings.EnableFullCompression}");
         logger.LogInfo($"  Smart mode: {optimizationSettings.EnableSmartMode}");
         logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
-        
+
         return Task.Run(() => CropInternal(inputPdf, cropSettings, optimizationSettings, logger, ct), ct);
     }
 
@@ -318,6 +327,16 @@ public static class PdfSmartCropper
         else
         {
             logger?.LogInfo("Using default compression level");
+        }
+
+        if (optimizationSettings.TargetPdfVersion != null)
+        {
+            props.SetPdfVersion(optimizationSettings.TargetPdfVersion.Value.ToPdfVersion());
+            logger?.LogInfo($"Setting target PDF version to: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}");
+        }
+        else
+        {
+            logger?.LogInfo("Preserving original PDF version");
         }
 
         if (optimizationSettings.EnableFullCompression)
