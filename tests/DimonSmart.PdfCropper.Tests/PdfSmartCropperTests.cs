@@ -258,6 +258,99 @@ public class PdfSmartCropperTests
     }
 
     [Fact]
+    public async Task CropAsync_MetadataCleanup_RemovesConfiguredEntries()
+    {
+        var input = CreatePdfWithMetadata();
+        var cropSettings = new CropSettings(CropMethod.ContentBased);
+        var optimizationSettings = new PdfOptimizationSettings(
+            removeXmpMetadata: true,
+            documentInfoKeysToRemove: new[] { "CustomKey" });
+
+        var cropped = await PdfSmartCropper.CropAsync(input, cropSettings, optimizationSettings);
+
+        using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
+
+        Assert.True(string.IsNullOrEmpty(result.GetDocumentInfo().GetMoreInfo("CustomKey")));
+
+        var metadataStream = result.GetCatalog().GetPdfObject().GetAsStream(PdfName.Metadata);
+        if (metadataStream != null)
+        {
+            var metadataBytes = metadataStream.GetBytes(true);
+            var metadataContent = Encoding.UTF8.GetString(metadataBytes);
+            Assert.DoesNotContain("<Test>Value</Test>", metadataContent);
+        }
+    }
+
+    [Fact]
+    public async Task CropAsync_RemoveEmbeddedStandardFonts_DropsFontStreams()
+    {
+        var input = CreatePdf(pdf =>
+        {
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+            var font = iText.Kernel.Font.PdfFontFactory.CreateFont(
+                iText.IO.Font.Constants.StandardFonts.HELVETICA,
+                iText.IO.Font.PdfEncodings.WINANSI);
+
+            canvas.BeginText();
+            canvas.SetFontAndSize(font, 12);
+            canvas.MoveText(72, 720);
+            canvas.ShowText("Embedded Helvetica");
+            canvas.EndText();
+
+            var resources = page.GetResources();
+            var fonts = resources.GetResource(PdfName.Font) as PdfDictionary;
+            if (fonts == null)
+            {
+                return;
+            }
+
+            foreach (var name in fonts.KeySet())
+            {
+                var fontDictionary = fonts.GetAsDictionary(name);
+                if (fontDictionary == null)
+                {
+                    continue;
+                }
+
+                var descriptor = fontDictionary.GetAsDictionary(PdfName.FontDescriptor);
+                if (descriptor == null)
+                {
+                    descriptor = new PdfDictionary();
+                    fontDictionary.Put(PdfName.FontDescriptor, descriptor);
+                }
+
+                descriptor.Put(PdfName.FontName, fontDictionary.GetAsName(PdfName.BaseFont) ?? new PdfName("Helvetica"));
+                descriptor.Put(PdfName.FontFile, new PdfStream(new byte[] { 0x00 }));
+            }
+        });
+
+        var cropSettings = new CropSettings(CropMethod.ContentBased);
+        var optimizationSettings = new PdfOptimizationSettings(removeEmbeddedStandardFonts: true);
+
+        var cropped = await PdfSmartCropper.CropAsync(input, cropSettings, optimizationSettings);
+
+        using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
+        var page = result.GetPage(1);
+        var fonts = page.GetResources().GetResource(PdfName.Font) as PdfDictionary;
+        Assert.NotNull(fonts);
+
+        foreach (var name in fonts.KeySet())
+        {
+            var fontDictionary = fonts.GetAsDictionary(name);
+            var descriptor = fontDictionary?.GetAsDictionary(PdfName.FontDescriptor);
+            if (descriptor == null)
+            {
+                continue;
+            }
+
+            Assert.Null(descriptor.Get(PdfName.FontFile));
+            Assert.Null(descriptor.Get(PdfName.FontFile2));
+            Assert.Null(descriptor.Get(PdfName.FontFile3));
+        }
+    }
+
+    [Fact]
     public async Task CropAsync_EncryptedPdf_Throws()
     {
         var encrypted = CreateEncryptedPdf();
@@ -292,6 +385,29 @@ public class PdfSmartCropperTests
             var canvas = new PdfCanvas(page);
             canvas.MoveTo(50, 50);
             canvas.LineTo(150, 150);
+            canvas.Stroke();
+        }
+
+        return stream.ToArray();
+    }
+
+    private static byte[] CreatePdfWithMetadata()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new PdfWriter(stream))
+        using (var pdf = new PdfDocument(writer))
+        {
+            pdf.GetDocumentInfo().SetMoreInfo("CustomKey", "UnitTest");
+            var metadataBytes = Encoding.UTF8.GetBytes("<xmpmeta><Test>Value</Test></xmpmeta>");
+            var metadataStream = new PdfStream(metadataBytes);
+            metadataStream.Put(PdfName.Type, PdfName.Metadata);
+            metadataStream.Put(PdfName.Subtype, PdfName.XML);
+            pdf.GetCatalog().Put(PdfName.Metadata, metadataStream);
+
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+            canvas.MoveTo(50, 50);
+            canvas.LineTo(200, 200);
             canvas.Stroke();
         }
 
