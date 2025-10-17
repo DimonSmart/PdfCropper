@@ -13,7 +13,10 @@ public readonly struct CropSettings
     /// Whether to ignore content that touches current page boundaries when analyzing content bounds.
     /// </param>
     /// <param name="margin">Safety margin in points to add around detected content bounds.</param>
-    public CropSettings(CropMethod method, bool excludeEdgeTouchingObjects = false, float margin = 0.5f)
+    public CropSettings(
+        CropMethod method,
+        bool excludeEdgeTouchingObjects = false,
+        float margin = 0.5f)
     {
         Method = method;
         ExcludeEdgeTouchingObjects = excludeEdgeTouchingObjects;

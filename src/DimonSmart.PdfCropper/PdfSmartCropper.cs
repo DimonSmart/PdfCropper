@@ -1,4 +1,6 @@
+using System;
 using System.Diagnostics;
+using System.IO;
 using iText.Kernel.Exceptions;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
@@ -42,16 +44,45 @@ public static class PdfSmartCropper
         IPdfCropLogger? logger = null,
         CancellationToken ct = default)
     {
+        return CropAsync(inputPdf, settings, PdfOptimizationSettings.Default, logger, ct);
+    }
+
+    /// <summary>
+    /// Crops a PDF document using the specified settings and optimization parameters.
+    /// </summary>
+    /// <param name="inputPdf">The input PDF as a byte array.</param>
+    /// <param name="cropSettings">Cropping settings to apply.</param>
+    /// <param name="optimizationSettings">Optimization settings that control PDF serialization.</param>
+    /// <param name="logger">Optional logger for cropping operations.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The cropped PDF as a byte array.</returns>
+    public static Task<byte[]> CropAsync(
+        byte[] inputPdf,
+        CropSettings cropSettings,
+        PdfOptimizationSettings optimizationSettings,
+        IPdfCropLogger? logger = null,
+        CancellationToken ct = default)
+    {
         if (inputPdf is null)
         {
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
+        if (optimizationSettings is null)
+        {
+            throw new ArgumentNullException(nameof(optimizationSettings));
+        }
+
         logger ??= NullLogger.Instance;
-        return Task.Run(() => CropInternal(inputPdf, settings, logger, ct), ct);
+        return Task.Run(() => CropInternal(inputPdf, cropSettings, optimizationSettings, logger, ct), ct);
     }
 
-    private static byte[] CropInternal(byte[] inputPdf, CropSettings settings, IPdfCropLogger logger, CancellationToken ct)
+    private static byte[] CropInternal(
+        byte[] inputPdf,
+        CropSettings cropSettings,
+        PdfOptimizationSettings optimizationSettings,
+        IPdfCropLogger logger,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -64,13 +95,18 @@ public static class PdfSmartCropper
             var readerProps = new ReaderProperties();
 
             using var reader = new PdfReader(inputStream, readerProps);
-            using var writer = new PdfWriter(outputStream, new WriterProperties());
+            var writerProps = CreateWriterProperties(optimizationSettings);
+            using var writer = new PdfWriter(outputStream, writerProps);
+            if (optimizationSettings.EnableSmartMode)
+            {
+                writer.SetSmartMode(true);
+            }
             using var pdfDocument = new PdfDocument(reader, writer);
 
             var pageCount = pdfDocument.GetNumberOfPages();
-            logger.LogInfo($"Processing PDF with {pageCount} page(s) using {settings.Method} method");
+            logger.LogInfo($"Processing PDF with {pageCount} page(s) using {cropSettings.Method} method");
 
-            if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
+            if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
             {
                 logger.LogInfo("Edge-touching content will be ignored during bounds detection");
             }
@@ -93,17 +129,29 @@ public static class PdfSmartCropper
                 }
 
                 Rectangle? cropRectangle;
-                switch (settings.Method)
+                switch (cropSettings.Method)
                 {
                     case CropMethod.ContentBased:
-                        cropRectangle = ContentBasedCroppingStrategy.CropPage(page, logger, pageIndex, settings.ExcludeEdgeTouchingObjects, settings.Margin, ct);
+                        cropRectangle = ContentBasedCroppingStrategy.CropPage(
+                            page,
+                            logger,
+                            pageIndex,
+                            cropSettings.ExcludeEdgeTouchingObjects,
+                            cropSettings.Margin,
+                            ct);
                         break;
 
                     case CropMethod.BitmapBased:
                         if (BitmapBasedCroppingStrategy.IsSupportedOnCurrentPlatform())
                         {
 #pragma warning disable CA1416 // Validate platform compatibility
-                            cropRectangle = BitmapBasedCroppingStrategy.CropPage(inputPdf, pageIndex, pageSize, logger, settings.Margin, ct);
+                            cropRectangle = BitmapBasedCroppingStrategy.CropPage(
+                                inputPdf,
+                                pageIndex,
+                                pageSize,
+                                logger,
+                                cropSettings.Margin,
+                                ct);
 #pragma warning restore CA1416 // Validate platform compatibility
                         }
                         else
@@ -115,7 +163,7 @@ public static class PdfSmartCropper
                         break;
 
                     default:
-                        throw new ArgumentOutOfRangeException(nameof(settings.Method), settings.Method, "Unknown crop method");
+                        throw new ArgumentOutOfRangeException(nameof(cropSettings.Method), cropSettings.Method, "Unknown crop method");
                 }
 
                 if (cropRectangle == null)
@@ -137,11 +185,30 @@ public static class PdfSmartCropper
                 logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
             }
 
+            PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
+
+            if (optimizationSettings.RemoveEmbeddedStandardFonts)
+            {
+                PdfStandardFontCleaner.RemoveEmbeddedStandardFonts(pdfDocument);
+            }
+
+            if (optimizationSettings.RemoveUnusedObjects)
+            {
+                pdfDocument.SetFlushUnusedObjects(true);
+            }
+
             pdfDocument.Close();
             totalStopwatch.Stop();
             logger.LogInfo("PDF cropping completed successfully");
             logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
-            return outputStream.ToArray();
+
+            var resultBytes = outputStream.ToArray();
+            if (optimizationSettings.RemoveXmpMetadata)
+            {
+                resultBytes = PdfXmpCleaner.RemoveXmpMetadata(resultBytes, optimizationSettings);
+            }
+
+            return resultBytes;
         }
         catch (OperationCanceledException)
         {
@@ -203,5 +270,20 @@ public static class PdfSmartCropper
             : $"{elapsed.TotalSeconds:F2} s";
     }
 
+    internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings)
+    {
+        var props = new WriterProperties();
 
+        if (optimizationSettings.CompressionLevel.HasValue)
+        {
+            props.SetCompressionLevel(optimizationSettings.CompressionLevel.Value);
+        }
+
+        if (optimizationSettings.EnableFullCompression)
+        {
+            props.SetFullCompressionMode(true);
+        }
+
+        return props;
+    }
 }

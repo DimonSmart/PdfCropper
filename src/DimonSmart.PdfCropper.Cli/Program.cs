@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,6 @@ try
     Console.OutputEncoding = Encoding.UTF8;
     Console.InputEncoding = Encoding.UTF8;
 
-    // On Windows, also try to set the console code page to UTF-8
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
         Console.OutputEncoding = new UTF8Encoding(false);
@@ -25,96 +25,29 @@ return await RunAsync(args);
 
 static async Task<int> RunAsync(string[] args)
 {
-    if (args.Length < 2)
+    var parseResult = CommandLineParser.Parse(args);
+    if (!parseResult.Success)
     {
-        ShowUsage();
+        if (!string.IsNullOrEmpty(parseResult.ErrorMessage))
+        {
+            Console.Error.WriteLine($"Error: {parseResult.ErrorMessage}");
+        }
+
+        if (parseResult.ShowUsage)
+        {
+            ShowUsage();
+        }
+
         return 1;
     }
 
-    var inputPath = args[0];
-    var outputPath = args[1];
-    var settings = CropSettings.Default;
-    var logLevel = LogLevel.None;
+    var options = parseResult.Options!;
+    var cropSettings = options.CropSettings;
+    var optimizationSettings = options.OptimizationSettings;
 
-    for (var i = 2; i < args.Length; i++)
-    {
-        if (args[i] == "-v" || args[i] == "--verbose")
-        {
-            logLevel = LogLevel.Information;
-            continue;
-        }
-
-        if (args[i] == "-l" || args[i] == "--log-level")
-        {
-            if (i + 1 >= args.Length)
-            {
-                Console.Error.WriteLine("Error: --log-level requires a value (none, debug, trace, information, warning, error)");
-                return 1;
-            }
-
-            try
-            {
-                var levelValue = args[i + 1].ToLowerInvariant();
-                logLevel = levelValue switch
-                {
-                    "none" => LogLevel.None,
-                    "info" or "information" => LogLevel.Information,
-                    "warning" or "warn" => LogLevel.Warning,
-                    "error" => LogLevel.Error,
-                    "debug" => LogLevel.Debug,
-                    "trace" => LogLevel.Trace,
-                    _ => throw new ArgumentException($"Invalid log level '{args[i + 1]}'. Valid values: none, debug, trace, information, warning, error.")
-                };
-            }
-            catch (ArgumentException ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                return 1;
-            }
-            i++;
-            continue;
-        }
-
-        if (args[i] == "-m" || args[i] == "--method")
-        {
-            if (i + 1 >= args.Length)
-            {
-                Console.Error.WriteLine("Error: --method requires a value (0, 1, 00, or 01)");
-                return 1;
-            }
-
-            if (!TryParseMethod(args[i + 1], out settings))
-            {
-                Console.Error.WriteLine("Error: method must be 0, 1, 00, or 01");
-                return 1;
-            }
-
-            i++;
-            continue;
-        }
-
-        if (args[i] == "--margin")
-        {
-            if (i + 1 >= args.Length)
-            {
-                Console.Error.WriteLine("Error: --margin requires a numeric value (margin in points)");
-                return 1;
-            }
-
-            if (!float.TryParse(args[i + 1], out var margin) || margin < 0)
-            {
-                Console.Error.WriteLine("Error: margin must be a non-negative number");
-                return 1;
-            }
-
-            settings = new CropSettings(settings.Method, settings.ExcludeEdgeTouchingObjects, margin);
-            i++;
-            continue;
-        }
-
-        Console.Error.WriteLine($"Error: Unknown argument '{args[i]}'");
-        return 1;
-    }
+    var inputPath = options.InputPath;
+    var outputPath = options.OutputPath;
+    var logLevel = options.LogLevel;
 
     var inputHasMask = BatchPlanner.ContainsGlobPattern(inputPath);
     var outputHasMask = BatchPlanner.ContainsGlobPattern(outputPath);
@@ -138,7 +71,7 @@ static async Task<int> RunAsync(string[] args)
                 return 2;
             }
 
-            var exitCode = await CropFileAsync(item.InputPath, item.OutputPath, settings, logger);
+            var exitCode = await CropFileAsync(item.InputPath, item.OutputPath, cropSettings, optimizationSettings, logger);
             if (exitCode != 0)
             {
                 return exitCode;
@@ -161,7 +94,7 @@ static async Task<int> RunAsync(string[] args)
     }
 
     var singleLogger = new ConsoleLogger(logLevel);
-    return await CropFileAsync(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), settings, singleLogger);
+    return await CropFileAsync(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), cropSettings, optimizationSettings, singleLogger);
 }
 
 static void ShowUsage()
@@ -175,6 +108,14 @@ static void ShowUsage()
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
     Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
+    Console.WriteLine("  --compression-level <level>  Deflate compression level (NO_COMPRESSION, DEFAULT_COMPRESSION, BEST_SPEED, BEST_COMPRESSION)");
+    Console.WriteLine("  --full-compression    Enable compact cross-reference compression");
+    Console.WriteLine("  --smart               Enable smart mode resource deduplication");
+    Console.WriteLine("  --remove-unused       Remove unused PDF objects before saving");
+    Console.WriteLine("  --remove-xmp          Remove XMP metadata from the catalog");
+    Console.WriteLine("  --clear-info          Remove legacy document info dictionary");
+    Console.WriteLine("  --remove-info-key <k> Remove specific document info key (repeatable)");
+    Console.WriteLine("  --remove-standard-fonts  Remove embedded files for standard PDF fonts");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
     Console.WriteLine("  -l, --log-level <lvl> Logging level:");
     Console.WriteLine("                        none = no logging (default)");
@@ -196,20 +137,25 @@ static void ShowUsage()
     Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
 }
 
-static async Task<int> CropFileAsync(string inputPath, string outputPath, CropSettings settings, ConsoleLogger logger)
+static async Task<int> CropFileAsync(
+    string inputPath,
+    string outputPath,
+    CropSettings cropSettings,
+    PdfOptimizationSettings optimizationSettings,
+    ConsoleLogger logger)
 {
     try
     {
         logger.LogInfo($"Reading input file: {inputPath}");
         var inputBytes = await File.ReadAllBytesAsync(inputPath);
 
-        logger.LogInfo($"Cropping PDF using {settings.Method} method...");
-        if (settings.Method == CropMethod.ContentBased && settings.ExcludeEdgeTouchingObjects)
+        logger.LogInfo($"Cropping PDF using {cropSettings.Method} method...");
+        if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
             logger.LogInfo("Edge-touching content will be ignored during bounds detection");
         }
 
-        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, settings, logger);
+        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, cropSettings, optimizationSettings, logger);
 
         var targetDirectory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(targetDirectory))
@@ -234,38 +180,6 @@ static async Task<int> CropFileAsync(string inputPath, string outputPath, CropSe
         logger.LogError($"Stack trace: {ex.StackTrace}");
         return 99;
     }
-}
-
-static bool TryParseMethod(string value, out CropSettings settings)
-{
-    settings = CropSettings.Default;
-
-    if (string.IsNullOrWhiteSpace(value))
-    {
-        return false;
-    }
-
-    var normalized = value.Trim();
-
-    if (normalized == "0" || normalized == "00")
-    {
-        settings = new CropSettings(CropMethod.ContentBased);
-        return true;
-    }
-
-    if (normalized == "01")
-    {
-        settings = new CropSettings(CropMethod.ContentBased, true);
-        return true;
-    }
-
-    if (normalized == "1")
-    {
-        settings = new CropSettings(CropMethod.BitmapBased);
-        return true;
-    }
-
-    return false;
 }
 
 static int MapErrorCode(PdfCropErrorCode code) => code switch
