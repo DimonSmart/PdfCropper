@@ -21,6 +21,15 @@ Here's a visual example of what PdfCropper does - it removes unnecessary margins
 The CLI utility is particularly useful for reading e-books with minimal margins, making them more comfortable to read on tablets and e-readers by removing excessive whitespace around the content.
 
 
+## Download the CLI
+
+Need the tool without compiling it yourself? Grab the latest self-contained Windows build here:
+
+* [PdfCropper.Cli-win-x64.exe](https://github.com/DimonSmart/PdfCropper/releases/latest/download/PdfCropper.Cli-win-x64.exe) – portable single-file executable that works on any 64-bit Windows machine.
+
+Each tagged release also contains the NuGet package and the CLI executable as downloadable assets.
+
+
 ## Platform Support
 
 ✅ **Windows** - Full support  
@@ -58,32 +67,49 @@ Install-Package DimonSmart.PdfCropper
 
 ## Usage
 
-### Basic Usage (ContentBased method - default)
+### Minimal crop (three lines)
 
 ```csharp
 using DimonSmart.PdfCropper;
 
-byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, cancellationToken);
+byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes);
 ```
 
-### Using BitmapBased Method
+The default call uses the `ContentBased` method, keeps a 0.5pt safety margin, and does not touch document metadata.
+
+### Aggressive crop with all clean-up switches
 
 ```csharp
 using DimonSmart.PdfCropper;
 
+var profile = PdfCropProfiles.Aggressive;
 byte[] cropped = await PdfSmartCropper.CropAsync(
-    inputBytes, 
-    CropMethod.BitmapBased, 
-    logger: null,
-    cancellationToken);
+    inputBytes,
+    profile.CropSettings,
+    optimizationSettings: profile.OptimizationSettings,
+    logger: null);
 ```
 
-### With Custom Logger
+The aggressive preset removes edge-touching artefacts, applies maximum Deflate compression, enables smart mode, removes unused objects and metadata, clears document info, and strips embedded standard fonts.
+
+### Built-in presets
+
+The library ships with ready-to-use profiles for common scenarios:
+
+| Key | Description | Crop settings | Optimization settings |
+|-----|-------------|---------------|-----------------------|
+| `simple` | Default behaviour for quick cropping. | Content-based, keeps edge content, 0.5pt margin. | No extra optimisation (same as `PdfOptimizationSettings.Default`). |
+| `ebook` | Recommended for reading PDFs on e-readers. | Content-based, ignores artefacts that touch the page edge, 1pt margin. | Default optimisation. |
+| `aggressive` | Tight crop plus the strongest clean-up and compression. | Content-based, ignores edge artefacts, 0.25pt margin. | Full compression, smart mode, unused-object removal, metadata cleanup, PDF 1.7 target. |
+
+Retrieve a profile via `PdfCropProfiles.Simple`, `PdfCropProfiles.Ebook`, or `PdfCropProfiles.Aggressive`. You can also resolve a profile dynamically by key: `PdfCropProfiles.TryGet("ebook", out var profile)`.
+
+### Custom logger
 
 ```csharp
 using DimonSmart.PdfCropper;
 
-public class MyLogger : IPdfCropLogger
+public sealed class MyLogger : IPdfCropLogger
 {
     public void LogInfo(string message) => Console.WriteLine($"[INFO] {message}");
     public void LogWarning(string message) => Console.WriteLine($"[WARN] {message}");
@@ -91,14 +117,10 @@ public class MyLogger : IPdfCropLogger
 }
 
 var logger = new MyLogger();
-byte[] cropped = await PdfSmartCropper.CropAsync(
-    inputBytes, 
-    CropMethod.ContentBased, 
-    logger,
-    cancellationToken);
+byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, CropMethod.ContentBased, logger);
 ```
 
-The method throws `PdfCropException` with a specific `PdfCropErrorCode` when the input is invalid, encrypted or cannot be processed.
+Every overload throws `PdfCropException` with a `PdfCropErrorCode` when the input PDF is invalid, encrypted, or fails to process.
 
 ### Command Line Utility
 
@@ -107,25 +129,27 @@ The repository includes a console application that wraps the library. This CLI t
 **Perfect for e-book readers**: Transform PDF books with large margins into reader-friendly versions that utilize screen space more efficiently.
 
 ```bash
-# Basic usage (ContentBased method)
-dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf output.pdf
+# Run the ready-made Windows build (download link above)
+PdfCropper.Cli-win-x64.exe input.pdf output.pdf
 
-# With BitmapBased method
-dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf output.pdf -m 1
+# Use the e-book preset (ignores edge artefacts, keeps 1pt margin)
+PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset ebook
 
-# With verbose logging
-dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf output.pdf -v
+# Apply the aggressive preset with verbose logging
+PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset aggressive -v
 
-# All options combined
-dotnet run --project src/PdfCropper.Cli/PdfCropper.Cli.csproj -- input.pdf output.pdf -m 1 -v
+# From source (cross-platform)
+dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj -- input.pdf output.pdf --preset simple
 ```
 
 #### CLI Options
 
+- `--preset <simple|ebook|aggressive>` - Apply a predefined set of crop/optimisation options
 - `-m, --method <0|1>` - Cropping method:
   - `0` = ContentBased (default, analyzes PDF content)
   - `1` = BitmapBased (renders to image, slower but more accurate)
 - `-v, --verbose` - Enable verbose logging
+- All low-level switches (`--margin`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
 
 ## Cropping Methods Comparison
 

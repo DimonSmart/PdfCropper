@@ -145,6 +145,43 @@ internal static class CommandLineParser
 
                     break;
 
+                case "--preset":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure($"--preset requires a value ({string.Join(", ", PdfCropProfiles.Keys)})");
+                    }
+
+                    var presetKey = args[++i];
+                    if (!PdfCropProfiles.TryGet(presetKey, out var presetProfile))
+                    {
+                        return CommandLineParseResult.Failure($"Unknown preset '{presetKey}'. Use one of: {string.Join(", ", PdfCropProfiles.Keys)}.");
+                    }
+
+                    method = presetProfile.CropSettings.Method;
+                    excludeEdge = presetProfile.CropSettings.ExcludeEdgeTouchingObjects;
+                    margin = presetProfile.CropSettings.Margin;
+
+                    var presetOptimization = presetProfile.OptimizationSettings;
+                    compressionLevel = presetOptimization.CompressionLevel;
+                    enableFullCompression = presetOptimization.EnableFullCompression;
+                    enableSmartMode = presetOptimization.EnableSmartMode;
+                    removeUnusedObjects = presetOptimization.RemoveUnusedObjects;
+                    removeXmpMetadata = presetOptimization.RemoveXmpMetadata;
+                    clearDocumentInfo = presetOptimization.ClearDocumentInfo;
+                    removeEmbeddedStandardFonts = presetOptimization.RemoveEmbeddedStandardFonts;
+                    targetPdfVersion = presetOptimization.TargetPdfVersion;
+
+                    infoKeys.Clear();
+                    if (!clearDocumentInfo)
+                    {
+                        foreach (var key in presetOptimization.DocumentInfoKeysToRemove)
+                        {
+                            infoKeys.Add(key);
+                        }
+                    }
+
+                    break;
+
                 case "--compression-level":
                     if (i + 1 >= args.Length)
                     {
