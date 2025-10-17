@@ -64,6 +64,10 @@ internal static class CommandLineParser
         ", ",
         PdfCompressionLevels.Names);
 
+    private static readonly string SupportedPdfVersions = string.Join(
+        ", ",
+        PdfCompatibilityLevelInfo.SupportedVersions);
+
     public static CommandLineParseResult Parse(string[] args)
     {
         if (args.Length < 2)
@@ -87,6 +91,7 @@ internal static class CommandLineParser
         var removeEmbeddedStandardFonts = false;
         var infoKeys = new List<string>();
         var logLevel = LogLevel.None;
+        PdfCompatibilityLevel? targetPdfVersion = null;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -155,6 +160,21 @@ internal static class CommandLineParser
                     compressionLevel = parsedLevel;
                     break;
 
+                case "--pdf-version":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--pdf-version requires a value");
+                    }
+
+                    var versionArg = args[++i];
+                    if (!TryParsePdfVersion(versionArg, out var parsedVersion))
+                    {
+                        return CommandLineParseResult.Failure($"invalid PDF version '{versionArg}'. Use {SupportedPdfVersions}.");
+                    }
+
+                    targetPdfVersion = parsedVersion;
+                    break;
+
                 case "--full-compression":
                     enableFullCompression = true;
                     break;
@@ -211,7 +231,8 @@ internal static class CommandLineParser
             removeXmpMetadata,
             clearDocumentInfo,
             clearDocumentInfo ? null : infoKeys,
-            removeEmbeddedStandardFonts);
+            removeEmbeddedStandardFonts,
+            targetPdfVersion);
 
         var options = new CommandLineOptions(inputPath, outputPath, cropSettings, optimizationSettings, logLevel);
         return CommandLineParseResult.Ok(options);
@@ -231,6 +252,11 @@ internal static class CommandLineParser
         }
 
         return false;
+    }
+
+    private static bool TryParsePdfVersion(string value, out PdfCompatibilityLevel version)
+    {
+        return PdfCompatibilityLevelInfo.TryParse(value, out version);
     }
 
     private static bool TryParseLogLevel(string value, out LogLevel logLevel)

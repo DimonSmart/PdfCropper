@@ -282,6 +282,19 @@ public class PdfSmartCropperTests
     }
 
     [Fact]
+    public async Task CropAsync_TargetPdfVersion_OverridesOutputCompatibility()
+    {
+        var input = CreatePdfWithVersion(PdfVersion.PDF_1_2);
+        var cropSettings = new CropSettings(CropMethod.ContentBased);
+        var optimizationSettings = new PdfOptimizationSettings(targetPdfVersion: PdfCompatibilityLevel.Pdf17);
+
+        var cropped = await PdfSmartCropper.CropAsync(input, cropSettings, optimizationSettings);
+
+        using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
+        Assert.True(result.GetPdfVersion().Equals(PdfVersion.PDF_1_7));
+    }
+
+    [Fact]
     public async Task CropAsync_RemoveEmbeddedStandardFonts_DropsFontStreams()
     {
         var input = CreatePdf(pdf =>
@@ -366,6 +379,24 @@ public class PdfSmartCropperTests
         using (var pdf = new PdfDocument(writer))
         {
             builder(pdf);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static byte[] CreatePdfWithVersion(PdfVersion version)
+    {
+        using var stream = new MemoryStream();
+        var writerProps = new WriterProperties().SetPdfVersion(version);
+
+        using (var writer = new PdfWriter(stream, writerProps))
+        using (var pdf = new PdfDocument(writer))
+        {
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+            canvas.MoveTo(50, 50);
+            canvas.LineTo(200, 200);
+            canvas.Stroke();
         }
 
         return stream.ToArray();

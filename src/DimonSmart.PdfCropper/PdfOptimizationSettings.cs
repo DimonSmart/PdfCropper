@@ -20,6 +20,7 @@ public sealed class PdfOptimizationSettings
     /// <param name="clearDocumentInfo">Removes the legacy document info dictionary entirely when set.</param>
     /// <param name="documentInfoKeysToRemove">Specific document info keys to remove when not clearing the dictionary.</param>
     /// <param name="removeEmbeddedStandardFonts">Removes embedded font streams for the 14 standard fonts when set.</param>
+    /// <param name="targetPdfVersion">Sets the compatibility level for the resulting PDF when specified.</param>
     public PdfOptimizationSettings(
         int? compressionLevel = null,
         bool enableFullCompression = false,
@@ -28,7 +29,8 @@ public sealed class PdfOptimizationSettings
         bool removeXmpMetadata = false,
         bool clearDocumentInfo = false,
         IEnumerable<string>? documentInfoKeysToRemove = null,
-        bool removeEmbeddedStandardFonts = false)
+        bool removeEmbeddedStandardFonts = false,
+        PdfCompatibilityLevel? targetPdfVersion = null)
     {
         CompressionLevel = compressionLevel;
         EnableFullCompression = enableFullCompression;
@@ -37,6 +39,7 @@ public sealed class PdfOptimizationSettings
         RemoveXmpMetadata = removeXmpMetadata;
         ClearDocumentInfo = clearDocumentInfo;
         RemoveEmbeddedStandardFonts = removeEmbeddedStandardFonts;
+        TargetPdfVersion = targetPdfVersion;
 
         if (clearDocumentInfo || documentInfoKeysToRemove is null)
         {
@@ -101,6 +104,11 @@ public sealed class PdfOptimizationSettings
     /// Gets a value indicating whether embedded standard font files should be removed.
     /// </summary>
     public bool RemoveEmbeddedStandardFonts { get; }
+
+    /// <summary>
+    /// Gets the desired compatibility level for the output PDF or <c>null</c> to keep the original version.
+    /// </summary>
+    public PdfCompatibilityLevel? TargetPdfVersion { get; }
 
     /// <summary>
     /// Gets default optimization settings that keep the original document layout.

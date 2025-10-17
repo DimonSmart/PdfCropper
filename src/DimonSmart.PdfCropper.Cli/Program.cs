@@ -110,6 +110,7 @@ static void ShowUsage()
     Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
     Console.WriteLine("  --compression-level <level>  Deflate compression level (NO_COMPRESSION, DEFAULT_COMPRESSION, BEST_SPEED, BEST_COMPRESSION)");
     Console.WriteLine("                        Note: For maximum size reduction, combine with --full-compression, --smart, --remove-unused");
+    Console.WriteLine("  --pdf-version <ver>   Target PDF compatibility (1.0-1.7, 2.0). Default: keep original version");
     Console.WriteLine("  --full-compression    Enable compact cross-reference compression");
     Console.WriteLine("  --smart               Enable smart mode resource deduplication");
     Console.WriteLine("  --remove-unused       Remove unused PDF objects before saving");
