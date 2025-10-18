@@ -33,19 +33,14 @@ jobs:
       id: extract_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-    - name: Update project version
-      run: |
-        sed -i "s/<PackageVersion>.*<\/PackageVersion>/<PackageVersion>${{ steps.extract_version.outputs.VERSION }}<\/PackageVersion>/" src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
-        sed -i "s/<Version>.*<\/Version>/<Version>${{ steps.extract_version.outputs.VERSION }}<\/Version>/" src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
-
     - name: Restore dependencies
       run: dotnet restore src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj
 
     - name: Build project
-      run: dotnet build src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-restore
+      run: dotnet build src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-restore -p:Version=${{ steps.extract_version.outputs.VERSION }} -p:PackageVersion=${{ steps.extract_version.outputs.VERSION }}
 
     - name: Create package
-      run: dotnet pack src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-build --output ./artifacts
+      run: dotnet pack src/DimonSmart.PdfCropper/DimonSmart.PdfCropper.csproj --configuration Release --no-build -p:Version=${{ steps.extract_version.outputs.VERSION }} -p:PackageVersion=${{ steps.extract_version.outputs.VERSION }} --output ./artifacts
 
     - name: Publish CLI (win-x64 single file)
       run: dotnet publish src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj --configuration Release --runtime win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true --output ./artifacts/cli-win-x64
