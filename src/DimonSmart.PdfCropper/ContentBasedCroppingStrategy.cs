@@ -19,11 +19,19 @@ internal static class ContentBasedCroppingStrategy
     /// <param name="pageIndex">The 1-based page index.</param>
     /// <param name="excludeEdgeTouchingObjects">Whether to exclude objects touching page edges.</param>
     /// <param name="margin">Margin to add around content bounds.</param>
+    /// <param name="edgeExclusionTolerance">Tolerance for considering content as touching a page edge.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The crop rectangle, or null if no content found.</returns>
-    public static Rectangle? CropPage(PdfPage page, IPdfCropLogger logger, int pageIndex, bool excludeEdgeTouchingObjects, float margin, CancellationToken ct)
+    public static Rectangle? CropPage(
+        PdfPage page,
+        IPdfCropLogger logger,
+        int pageIndex,
+        bool excludeEdgeTouchingObjects,
+        float margin,
+        float edgeExclusionTolerance,
+        CancellationToken ct)
     {
-        var collector = new ContentBoundingBoxCollector(page.GetPageSize(), excludeEdgeTouchingObjects, ct);
+        var collector = new ContentBoundingBoxCollector(page.GetPageSize(), excludeEdgeTouchingObjects, edgeExclusionTolerance, ct);
         var processor = new PdfCanvasProcessor(collector);
         processor.ProcessPageContent(page);
 
@@ -67,9 +75,8 @@ internal static class ContentBasedCroppingStrategy
         }
     }
 
-    private sealed class ContentBoundingBoxCollector(Rectangle pageBox, bool excludeEdgeTouchingObjects, CancellationToken ct) : IEventListener
+    private sealed class ContentBoundingBoxCollector(Rectangle pageBox, bool excludeEdgeTouchingObjects, float edgeExclusionTolerance, CancellationToken ct) : IEventListener
     {
-        private const double EdgeExclusionDelta = 1.0;
         private static readonly ICollection<EventType> SupportedEvents = new[]
         {
             EventType.RENDER_TEXT,
@@ -78,6 +85,7 @@ internal static class ContentBasedCroppingStrategy
         };
         private readonly Rectangle _pageBox = pageBox;
         private readonly bool _excludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
+        private readonly double _edgeExclusionTolerance = edgeExclusionTolerance;
         private double? _minX;
         private double? _minY;
         private double? _maxX;
@@ -245,10 +253,10 @@ internal static class ContentBasedCroppingStrategy
             var bottom = _pageBox.GetBottom();
             var top = _pageBox.GetTop();
 
-            return bounds.MinX <= left + EdgeExclusionDelta ||
-                   bounds.MinY <= bottom + EdgeExclusionDelta ||
-                   bounds.MaxX >= right - EdgeExclusionDelta ||
-                   bounds.MaxY >= top - EdgeExclusionDelta;
+            return bounds.MinX <= left + _edgeExclusionTolerance ||
+                   bounds.MinY <= bottom + _edgeExclusionTolerance ||
+                   bounds.MaxX >= right - _edgeExclusionTolerance ||
+                   bounds.MaxY >= top - _edgeExclusionTolerance;
         }
 
         private static Vector? TransformPoint(Point? point, Matrix? matrix)

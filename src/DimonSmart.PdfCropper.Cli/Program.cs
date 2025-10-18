@@ -110,6 +110,7 @@ static void ShowUsage()
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
     Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
+    Console.WriteLine("  --edge-tolerance <pt> Distance from the page edge (in points) considered a touch when excluding edge content (default: 1.0)");
     Console.WriteLine("  --compression-level <level>  Deflate compression level (NO_COMPRESSION, DEFAULT_COMPRESSION, BEST_SPEED, BEST_COMPRESSION)");
     Console.WriteLine("                        Note: For maximum size reduction, combine with --full-compression, --smart, --remove-unused");
     Console.WriteLine("  --pdf-version <ver>   Target PDF compatibility (1.0-1.7, 2.0). Default: keep original version");
@@ -159,7 +160,7 @@ static async Task<int> CropFileAsync(
         logger.LogInfo($"Cropping PDF using {cropSettings.Method} method...");
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
-            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+            logger.LogInfo($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection");
         }
 
         var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, cropSettings, optimizationSettings, logger);

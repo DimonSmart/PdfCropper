@@ -140,6 +140,46 @@ public class PdfSmartCropperTests
     }
 
     [Fact]
+    public async Task CropAsync_EdgeExclusionTolerance_AdjustsEdgeClassification()
+    {
+        const float nearEdgeOffset = 0.3f;
+
+        var input = CreatePdf(pdf =>
+        {
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+
+            canvas.SaveState();
+            canvas.SetFillColorGray(0.5f);
+            canvas.Rectangle(nearEdgeOffset, 600, 40, 40);
+            canvas.Fill();
+            canvas.RestoreState();
+
+            canvas.SaveState();
+            canvas.SetFillColorGray(0.2f);
+            canvas.Rectangle(150, 450, 120, 120);
+            canvas.Fill();
+            canvas.RestoreState();
+        });
+
+        var defaultSettings = new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true);
+        var strictSettings = new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true, edgeExclusionTolerance: 0.1f);
+
+        var croppedDefault = await PdfSmartCropper.CropAsync(input, defaultSettings);
+        var croppedStrict = await PdfSmartCropper.CropAsync(input, strictSettings);
+
+        using var pdfDefault = new PdfDocument(new PdfReader(new MemoryStream(croppedDefault)));
+        using var pdfStrict = new PdfDocument(new PdfReader(new MemoryStream(croppedStrict)));
+
+        var defaultLeft = pdfDefault.GetPage(1).GetCropBox().GetLeft();
+        var strictLeft = pdfStrict.GetPage(1).GetCropBox().GetLeft();
+
+        Assert.True(defaultLeft > 100);
+        Assert.True(strictLeft < 10);
+        Assert.True(strictLeft < defaultLeft);
+    }
+
+    [Fact]
     public async Task CropAsync_ThickOrthogonalLines_KeepsFullStroke()
     {
         const float lineWidth = 40f;

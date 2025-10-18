@@ -133,7 +133,7 @@ public static class PdfSmartCropper
 
             if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
             {
-                logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+                logger.LogInfo($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection");
             }
 
             for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
@@ -163,6 +163,7 @@ public static class PdfSmartCropper
                             pageIndex,
                             cropSettings.ExcludeEdgeTouchingObjects,
                             cropSettings.Margin,
+                            cropSettings.EdgeExclusionTolerance,
                             ct);
                         break;
 

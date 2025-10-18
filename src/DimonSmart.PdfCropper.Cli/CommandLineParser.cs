@@ -81,6 +81,7 @@ internal static class CommandLineParser
         var method = CropSettings.Default.Method;
         var excludeEdge = CropSettings.Default.ExcludeEdgeTouchingObjects;
         var margin = CropSettings.Default.Margin;
+        var edgeTolerance = CropSettings.Default.EdgeExclusionTolerance;
 
         int? compressionLevel = null;
         var enableFullCompression = false;
@@ -160,6 +161,7 @@ internal static class CommandLineParser
                     method = presetProfile.CropSettings.Method;
                     excludeEdge = presetProfile.CropSettings.ExcludeEdgeTouchingObjects;
                     margin = presetProfile.CropSettings.Margin;
+                    edgeTolerance = presetProfile.CropSettings.EdgeExclusionTolerance;
 
                     var presetOptimization = presetProfile.OptimizationSettings;
                     compressionLevel = presetOptimization.CompressionLevel;
@@ -178,6 +180,19 @@ internal static class CommandLineParser
                         {
                             infoKeys.Add(key);
                         }
+                    }
+
+                    break;
+
+                case "--edge-tolerance":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--edge-tolerance requires a numeric value (tolerance in points)");
+                    }
+
+                    if (!float.TryParse(args[++i], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out edgeTolerance) || edgeTolerance < 0)
+                    {
+                        return CommandLineParseResult.Failure("edge-tolerance must be a non-negative number");
                     }
 
                     break;
@@ -259,7 +274,7 @@ internal static class CommandLineParser
             }
         }
 
-        var cropSettings = new CropSettings(method, excludeEdge, margin);
+        var cropSettings = new CropSettings(method, excludeEdge, margin, edgeTolerance);
         var optimizationSettings = new PdfOptimizationSettings(
             compressionLevel,
             enableFullCompression,

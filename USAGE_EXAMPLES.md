@@ -158,6 +158,19 @@ PdfCropper.Cli input.pdf output.pdf --margin 5.0
 
 **Note:** Margin is specified in points (1 point = 1/72 inch ≈ 0.35 mm)
 
+### Edge Exclusion Tolerance
+
+```bash
+# Default tolerance (1 point) when excluding edge content
+PdfCropper.Cli input.pdf output.pdf -m 01
+
+# Tight tolerance (0.2 points) keeps artefacts slightly away from the page border
+PdfCropper.Cli input.pdf output.pdf -m 01 --edge-tolerance 0.2
+
+# Relaxed tolerance (2 points) ignores anything close to the page boundary
+PdfCropper.Cli input.pdf output.pdf -m 01 --edge-tolerance 2.0
+```
+
 ### Verbose Logging
 
 ```bash
@@ -187,8 +200,8 @@ PdfCropper.Cli input.pdf output.pdf --margin 2.5 -v
 # BitmapBased with custom margin, excluding edge content
 PdfCropper.Cli input.pdf output.pdf -m 1 --margin 3.0
 
-# ContentBased excluding edge content with large margin
-PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 -v
+# ContentBased excluding edge content with large margin and tighter edge tolerance
+PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 --edge-tolerance 0.2 -v
 ```
 
 ## Logger Output Examples

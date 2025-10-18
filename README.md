@@ -75,7 +75,7 @@ using DimonSmart.PdfCropper;
 byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes);
 ```
 
-The default call uses the `ContentBased` method, keeps a 0.5pt safety margin, and does not touch document metadata.
+The default call uses the `ContentBased` method, keeps a 0.5pt safety margin, applies a 1.0pt tolerance when classifying edge-touching content, and does not touch document metadata.
 
 ### Aggressive crop with all clean-up switches
 
@@ -98,9 +98,9 @@ The library ships with ready-to-use profiles for common scenarios:
 
 | Key | Description | Crop settings | Optimization settings |
 |-----|-------------|---------------|-----------------------|
-| `simple` | Default behaviour for quick cropping. | Content-based, keeps edge content, 0.5pt margin. | No extra optimisation (same as `PdfOptimizationSettings.Default`). |
-| `ebook` | Recommended for reading PDFs on e-readers. | Content-based, ignores artefacts that touch the page edge, 1pt margin. | Default optimisation. |
-| `aggressive` | Tight crop plus the strongest clean-up and compression. | Content-based, ignores edge artefacts, 0.25pt margin. | Full compression, smart mode, unused-object removal, metadata cleanup, PDF 1.7 target. |
+| `simple` | Default behaviour for quick cropping. | Content-based, keeps edge content, 0.5pt margin, 1pt edge tolerance. | No extra optimisation (same as `PdfOptimizationSettings.Default`). |
+| `ebook` | Recommended for reading PDFs on e-readers. | Content-based, ignores artefacts that touch the page edge, 1pt margin, 1pt edge tolerance. | Default optimisation. |
+| `aggressive` | Tight crop plus the strongest clean-up and compression. | Content-based, ignores edge artefacts, 0.25pt margin, 1pt edge tolerance. | Full compression, smart mode, unused-object removal, metadata cleanup, PDF 1.7 target. |
 
 Retrieve a profile via `PdfCropProfiles.Simple`, `PdfCropProfiles.Ebook`, or `PdfCropProfiles.Aggressive`. You can also resolve a profile dynamically by key: `PdfCropProfiles.TryGet("ebook", out var profile)`.
 
@@ -149,6 +149,7 @@ dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csp
   - `0` = ContentBased (default, analyzes PDF content)
   - `1` = BitmapBased (renders to image, slower but more accurate)
 - `-v, --verbose` - Enable verbose logging
+- `--edge-tolerance <points>` - Distance from the page boundary (in points) that still counts as “touching the edge” when exclusion is enabled (default: 1.0)
 - All low-level switches (`--margin`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
 
 ## Cropping Methods Comparison
