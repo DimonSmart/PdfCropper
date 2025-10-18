@@ -50,8 +50,14 @@ jobs:
     - name: Publish CLI (win-x64 single file)
       run: dotnet publish src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj --configuration Release --runtime win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true --output ./artifacts/cli-win-x64
 
-    - name: Prepare CLI artifact
+    - name: Prepare CLI artifact (Windows)
       run: mv ./artifacts/cli-win-x64/DimonSmart.PdfCropper.Cli.exe ./artifacts/PdfCropper.Cli-win-x64.exe
+
+    - name: Publish CLI (linux-x64 single file)
+      run: dotnet publish src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj --configuration Release --runtime linux-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true --output ./artifacts/cli-linux-x64
+
+    - name: Prepare CLI artifact (Linux)
+      run: mv ./artifacts/cli-linux-x64/DimonSmart.PdfCropper.Cli ./artifacts/PdfCropper.Cli-linux-x64
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -59,6 +65,7 @@ jobs:
         files: |
           ./artifacts/*.nupkg
           ./artifacts/PdfCropper.Cli-win-x64.exe
+          ./artifacts/PdfCropper.Cli-linux-x64
         draft: false
         prerelease: false
         generate_release_notes: true
