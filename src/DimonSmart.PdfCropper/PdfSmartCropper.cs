@@ -53,7 +53,7 @@ public static class PdfSmartCropper
         IPdfCropLogger? logger = null,
         CancellationToken ct = default)
     {
-        var inputList = MaterializeInputs(inputs, nameof(inputs));
+        var inputList = inputs.ToList();
 
         return ProcessAsync(inputList, cropSettings, optimizationSettings, logger, ct, "PDF merging");
     }
@@ -108,36 +108,42 @@ public static class PdfSmartCropper
         IPdfCropLogger logger,
         CancellationToken ct)
     {
-        return inputs.Count == 1
-            ? CropInternal(inputs[0], cropSettings, optimizationSettings, logger, ct)
-            : CropAndMergeInternal(inputs, cropSettings, optimizationSettings, logger, ct);
-    }
+        ct.ThrowIfCancellationRequested();
 
-    private static IReadOnlyList<byte[]> MaterializeInputs(IEnumerable<byte[]> inputs, string parameterName)
-    {
-        if (inputs is null)
+        var totalStopwatch = Stopwatch.StartNew();
+        var operationName = inputs.Count == 1 ? "PDF cropping" : "PDF merging";
+        var totalInputSize = inputs.Sum(input => input.LongLength);
+        
+        logger.LogInfo(inputs.Count == 1 
+            ? $"Input PDF size: {inputs[0].Length:N0} bytes"
+            : $"Starting PDF merging for {inputs.Count} document(s)");
+
+        try
         {
-            throw new ArgumentNullException(parameterName);
+            var resultBytes = inputs.Count == 1
+                ? ProcessSingleDocument(inputs[0], cropSettings, optimizationSettings, logger, ct)
+                : ProcessMultipleDocuments(inputs, cropSettings, optimizationSettings, logger, ct);
+
+            totalStopwatch.Stop();
+            logger.LogInfo($"{operationName} completed successfully");
+            logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
+
+            var finalResult = ApplyXmpOptimizations(resultBytes, optimizationSettings, logger);
+            
+            LogSizeComparison(totalInputSize, finalResult.Length, logger);
+
+            return finalResult;
         }
-
-        var result = new List<byte[]>();
-
-        foreach (var input in inputs)
+        catch (OperationCanceledException)
         {
-            if (input is null)
-            {
-                throw new ArgumentException("Input PDF cannot be null.", parameterName);
-            }
-
-            result.Add(input);
+            HandleCancellation(logger, $"{operationName} cancelled");
+            throw;
         }
-
-        if (result.Count == 0)
+        catch (Exception ex)
         {
-            throw new ArgumentException("At least one input PDF must be provided.", parameterName);
+            HandleProcessingException(ex, logger);
+            throw;
         }
-
-        return result;
     }
 
     private static void LogOptimizationSettings(
@@ -170,247 +176,62 @@ public static class PdfSmartCropper
         logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
     }
 
-    private static byte[] CropInternal(
+    private static byte[] ProcessSingleDocument(
         byte[] inputPdf,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger,
         CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
+        using var inputStream = new MemoryStream(inputPdf, writable: false);
+        using var outputStream = new MemoryStream();
+        
+        using var reader = new PdfReader(inputStream, new ReaderProperties());
+        using var writer = CreatePdfWriter(outputStream, optimizationSettings);
+        using var pdfDocument = new PdfDocument(reader, writer);
 
-        var totalStopwatch = Stopwatch.StartNew();
-        logger.LogInfo($"Input PDF size: {inputPdf.Length:N0} bytes");
+        CropPages(pdfDocument, inputPdf, cropSettings, logger, ct);
+        ApplyFinalOptimizations(pdfDocument, optimizationSettings);
+        pdfDocument.Close();
 
-        try
-        {
-            using var inputStream = new MemoryStream(inputPdf, writable: false);
-            using var outputStream = new MemoryStream();
-            var readerProps = new ReaderProperties();
-
-            using var reader = new PdfReader(inputStream, readerProps);
-            var writerProps = CreateWriterProperties(optimizationSettings, logger);
-            using var writer = new PdfWriter(outputStream, writerProps);
-            if (optimizationSettings.EnableSmartMode)
-            {
-                writer.SetSmartMode(true);
-            }
-
-            using var pdfDocument = new PdfDocument(reader, writer);
-
-            CropPages(pdfDocument, inputPdf, cropSettings, logger, ct);
-
-            ApplyFinalOptimizations(pdfDocument, optimizationSettings);
-
-            pdfDocument.Close();
-            totalStopwatch.Stop();
-            logger.LogInfo("PDF cropping completed successfully");
-            logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
-
-            var resultBytesBeforeXmp = outputStream.ToArray();
-            logger.LogInfo($"Output PDF size before final optimization: {resultBytesBeforeXmp.Length:N0} bytes");
-
-            var resultBytes = optimizationSettings.RemoveXmpMetadata
-                ? PdfXmpCleaner.RemoveXmpMetadata(resultBytesBeforeXmp, optimizationSettings)
-                : resultBytesBeforeXmp;
-
-            if (optimizationSettings.RemoveXmpMetadata)
-            {
-                logger.LogInfo($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes");
-            }
-
-            var sizeReduction = inputPdf.Length - resultBytes.Length;
-            var percentReduction = inputPdf.Length > 0 ? (double)sizeReduction / inputPdf.Length * 100 : 0;
-
-            if (sizeReduction > 0)
-            {
-                logger.LogInfo($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)");
-            }
-            else if (sizeReduction < 0)
-            {
-                logger.LogInfo($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)");
-            }
-            else
-            {
-                logger.LogInfo("No size change");
-            }
-
-            return resultBytes;
-        }
-        catch (OperationCanceledException)
-        {
-            logger.LogWarning("PDF cropping cancelled");
-            throw;
-        }
-        catch (BadPasswordException ex)
-        {
-            logger.LogError($"PDF is encrypted: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-        }
-        catch (PdfCropException)
-        {
-            throw;
-        }
-        catch (PdfException ex)
-        {
-            if (IsEncryptionError(ex))
-            {
-                logger.LogError($"PDF encryption error: {ex.Message}");
-                throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-            }
-
-            logger.LogError($"Invalid PDF: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-        }
-        catch (IOException ex)
-        {
-            logger.LogError($"I/O error: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Processing error: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
-        }
+        return outputStream.ToArray();
     }
 
-    private static byte[] CropAndMergeInternal(
+    private static byte[] ProcessMultipleDocuments(
         IReadOnlyList<byte[]> inputs,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger,
         CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
+        using var outputStream = new MemoryStream();
+        using var writer = CreatePdfWriter(outputStream, optimizationSettings);
+        using var outputDocument = new PdfDocument(writer);
+        
+        var merger = new PdfMerger(outputDocument);
 
-        var totalStopwatch = Stopwatch.StartNew();
-        logger.LogInfo($"Starting PDF merging for {inputs.Count} document(s)");
-
-        try
+        foreach (var input in inputs)
         {
-            using var outputStream = new MemoryStream();
-            var writerProps = CreateWriterProperties(optimizationSettings, logger);
-            using var writer = new PdfWriter(outputStream, writerProps);
-            if (optimizationSettings.EnableSmartMode)
-            {
-                writer.SetSmartMode(true);
-            }
+            ct.ThrowIfCancellationRequested();
+            
+            var croppedBytes = CropWithoutFinalOptimizations(input, cropSettings, logger, ct);
+            
+            using var croppedStream = new MemoryStream(croppedBytes, writable: false);
+            using var reader = new PdfReader(croppedStream, new ReaderProperties());
+            using var croppedDocument = new PdfDocument(reader);
 
-            using var outputDocument = new PdfDocument(writer);
-            var merger = new PdfMerger(outputDocument);
+            var existingPageCount = outputDocument.GetNumberOfPages();
+            var pageCount = croppedDocument.GetNumberOfPages();
 
-            long totalInputSize = 0;
+            merger.Merge(croppedDocument, 1, pageCount);
 
-            foreach (var input in inputs)
-            {
-                ct.ThrowIfCancellationRequested();
-                totalInputSize += input.LongLength;
-
-                var croppedBytes = CropWithoutFinalOptimizations(input, cropSettings, logger, ct);
-
-                using var croppedStream = new MemoryStream(croppedBytes, writable: false);
-                using var reader = new PdfReader(croppedStream, new ReaderProperties());
-                using var croppedDocument = new PdfDocument(reader);
-
-                var existingPageCount = outputDocument.GetNumberOfPages();
-                var pageCount = croppedDocument.GetNumberOfPages();
-
-                merger.Merge(croppedDocument, 1, pageCount);
-
-                for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
-                {
-                    var targetPage = outputDocument.GetPage(existingPageCount + pageIndex + 1);
-                    var sourcePage = croppedDocument.GetPage(pageIndex + 1);
-
-                    var cropBox = sourcePage.GetCropBox();
-                    if (cropBox != null)
-                    {
-                        targetPage.SetCropBox(new Rectangle(cropBox));
-                    }
-
-                    var trimBox = sourcePage.GetTrimBox();
-                    if (trimBox != null)
-                    {
-                        targetPage.SetTrimBox(new Rectangle(trimBox));
-                    }
-                }
-            }
-
-            ApplyFinalOptimizations(outputDocument, optimizationSettings);
-
-            outputDocument.Close();
-            totalStopwatch.Stop();
-            logger.LogInfo("PDF merging completed successfully");
-            logger.LogInfo($"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}");
-
-            var resultBytesBeforeXmp = outputStream.ToArray();
-            logger.LogInfo($"Output PDF size before final optimization: {resultBytesBeforeXmp.Length:N0} bytes");
-
-            var resultBytes = optimizationSettings.RemoveXmpMetadata
-                ? PdfXmpCleaner.RemoveXmpMetadata(resultBytesBeforeXmp, optimizationSettings)
-                : resultBytesBeforeXmp;
-
-            if (optimizationSettings.RemoveXmpMetadata)
-            {
-                logger.LogInfo($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes");
-            }
-
-            if (totalInputSize > 0)
-            {
-                var sizeReduction = totalInputSize - resultBytes.LongLength;
-                var percentReduction = totalInputSize > 0 ? (double)sizeReduction / totalInputSize * 100 : 0;
-
-                if (sizeReduction > 0)
-                {
-                    logger.LogInfo($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)");
-                }
-                else if (sizeReduction < 0)
-                {
-                    logger.LogInfo($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)");
-                }
-                else
-                {
-                    logger.LogInfo("No size change");
-                }
-            }
-
-            return resultBytes;
+            CopyPageBoxes(outputDocument, croppedDocument, existingPageCount, pageCount);
         }
-        catch (OperationCanceledException)
-        {
-            logger.LogWarning("PDF merging cancelled");
-            throw;
-        }
-        catch (BadPasswordException ex)
-        {
-            logger.LogError($"PDF is encrypted: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-        }
-        catch (PdfCropException)
-        {
-            throw;
-        }
-        catch (PdfException ex)
-        {
-            if (IsEncryptionError(ex))
-            {
-                logger.LogError($"PDF encryption error: {ex.Message}");
-                throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-            }
 
-            logger.LogError($"Invalid PDF: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-        }
-        catch (IOException ex)
-        {
-            logger.LogError($"I/O error: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError($"Processing error: {ex.Message}");
-            throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
-        }
+        ApplyFinalOptimizations(outputDocument, optimizationSettings);
+        outputDocument.Close();
+
+        return outputStream.ToArray();
     }
 
     private static byte[] CropWithoutFinalOptimizations(
@@ -428,13 +249,11 @@ public static class PdfSmartCropper
         var readerProps = new ReaderProperties();
 
         using var reader = new PdfReader(inputStream, readerProps);
-        var writerProps = CreateWriterProperties(PdfOptimizationSettings.Default, logger);
-        using var writer = new PdfWriter(outputStream, writerProps);
+        using var writer = CreatePdfWriter(outputStream, PdfOptimizationSettings.Default);
 
         using var pdfDocument = new PdfDocument(reader, writer);
 
         CropPages(pdfDocument, inputPdf, cropSettings, logger, ct);
-
         pdfDocument.Close();
 
         return outputStream.ToArray();
@@ -552,6 +371,131 @@ public static class PdfSmartCropper
         return elapsed.TotalMilliseconds < 1000
             ? $"{elapsed.TotalMilliseconds:F2} ms"
             : $"{elapsed.TotalSeconds:F2} s";
+    }
+
+    private static void HandleCancellation(IPdfCropLogger logger, string operationName)
+    {
+        logger.LogWarning(operationName);
+    }
+
+    private static void LogSizeComparison(long originalSize, long newSize, IPdfCropLogger logger)
+    {
+        var sizeReduction = originalSize - newSize;
+        var percentReduction = originalSize > 0 ? (double)sizeReduction / originalSize * 100 : 0;
+
+        if (sizeReduction > 0)
+        {
+            logger.LogInfo($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)");
+        }
+        else if (sizeReduction < 0)
+        {
+            logger.LogInfo($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)");
+        }
+        else
+        {
+            logger.LogInfo("No size change");
+        }
+    }
+
+    private static PdfWriter CreatePdfWriter(MemoryStream outputStream, PdfOptimizationSettings optimizationSettings)
+    {
+        var writerProps = CreateWriterProperties(optimizationSettings);
+        var writer = new PdfWriter(outputStream, writerProps);
+        
+        if (optimizationSettings.EnableSmartMode)
+        {
+            writer.SetSmartMode(true);
+        }
+        
+        return writer;
+    }
+
+    private static byte[] ApplyXmpOptimizations(byte[] inputBytes, PdfOptimizationSettings optimizationSettings, IPdfCropLogger logger)
+    {
+        logger.LogInfo($"Output PDF size before final optimization: {inputBytes.Length:N0} bytes");
+
+        var resultBytes = optimizationSettings.RemoveXmpMetadata
+            ? PdfXmpCleaner.RemoveXmpMetadata(inputBytes, optimizationSettings)
+            : inputBytes;
+
+        if (optimizationSettings.RemoveXmpMetadata)
+        {
+            logger.LogInfo($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes");
+        }
+
+        return resultBytes;
+    }
+
+    private static void CopyPageBoxes(PdfDocument targetDocument, PdfDocument sourceDocument, int targetStartIndex, int pageCount)
+    {
+        for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
+        {
+            var targetPage = targetDocument.GetPage(targetStartIndex + pageIndex + 1);
+            var sourcePage = sourceDocument.GetPage(pageIndex + 1);
+
+            var cropBox = sourcePage.GetCropBox();
+            if (cropBox != null)
+            {
+                targetPage.SetCropBox(new Rectangle(cropBox));
+            }
+
+            var trimBox = sourcePage.GetTrimBox();
+            if (trimBox != null)
+            {
+                targetPage.SetTrimBox(new Rectangle(trimBox));
+            }
+        }
+    }
+
+    private static void HandleProcessingException(Exception ex, IPdfCropLogger logger)
+    {
+        switch (ex)
+        {
+            case BadPasswordException:
+                logger.LogError($"PDF is encrypted: {ex.Message}");
+                throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
+            
+            case PdfCropException:
+                return;
+            
+            case PdfException when IsEncryptionError((PdfException)ex):
+                logger.LogError($"PDF encryption error: {ex.Message}");
+                throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
+            
+            case PdfException:
+                logger.LogError($"Invalid PDF: {ex.Message}");
+                throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
+            
+            case IOException:
+                logger.LogError($"I/O error: {ex.Message}");
+                throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
+            
+            default:
+                logger.LogError($"Processing error: {ex.Message}");
+                throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
+        }
+    }
+
+    private static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings)
+    {
+        var props = new WriterProperties();
+
+        if (optimizationSettings.CompressionLevel.HasValue)
+        {
+            props.SetCompressionLevel(optimizationSettings.CompressionLevel.Value);
+        }
+
+        if (optimizationSettings.TargetPdfVersion != null)
+        {
+            props.SetPdfVersion(optimizationSettings.TargetPdfVersion.Value.ToPdfVersion());
+        }
+
+        if (optimizationSettings.EnableFullCompression)
+        {
+            props.SetFullCompressionMode(true);
+        }
+
+        return props;
     }
 
     internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings, IPdfCropLogger? logger = null)
