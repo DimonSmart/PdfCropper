@@ -411,6 +411,12 @@ public static class PdfSmartCropper
             PdfStandardFontCleaner.RemoveEmbeddedStandardFonts(pdfDocument);
         }
 
+        if (ShouldRecompressDocumentStreams(optimizationSettings))
+        {
+            var targetCompressionLevel = optimizationSettings.CompressionLevel ?? CompressionConstants.BEST_COMPRESSION;
+            RecompressDocumentStreams(pdfDocument, targetCompressionLevel);
+        }
+
         if (optimizationSettings.RemoveUnusedObjects)
         {
             pdfDocument.SetFlushUnusedObjects(true);
@@ -422,6 +428,54 @@ public static class PdfSmartCropper
         ct.ThrowIfCancellationRequested();
         var contentBytes = page.GetContentBytes();
         return contentBytes == null || contentBytes.Length == 0;
+    }
+
+    private static bool ShouldRecompressDocumentStreams(PdfOptimizationSettings optimizationSettings)
+    {
+        return optimizationSettings.CompressionLevel.HasValue || optimizationSettings.EnableFullCompression;
+    }
+
+    private static void RecompressDocumentStreams(PdfDocument pdfDocument, int compressionLevel)
+    {
+        var objectCount = pdfDocument.GetNumberOfPdfObjects();
+
+        for (var index = 1; index <= objectCount; index++)
+        {
+            var pdfObject = pdfDocument.GetPdfObject(index);
+            if (pdfObject is not PdfStream stream)
+            {
+                continue;
+            }
+
+            if (stream.IsFlushed())
+            {
+                continue;
+            }
+
+            var subtype = stream.GetAsName(PdfName.Subtype);
+            if (PdfName.Image.Equals(subtype))
+            {
+                continue;
+            }
+
+            try
+            {
+                var decodedBytes = stream.GetBytes(true);
+                if (decodedBytes is null)
+                {
+                    continue;
+                }
+
+                stream.Remove(PdfName.Filter);
+                stream.Remove(PdfName.DecodeParms);
+                stream.SetData(decodedBytes);
+                stream.SetCompressionLevel(compressionLevel);
+            }
+            catch
+            {
+                // Skip streams that cannot be decoded.
+            }
+        }
     }
 
     private static bool IsEncryptionError(PdfException exception)
