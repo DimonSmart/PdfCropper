@@ -138,6 +138,9 @@ PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset ebook
 # Apply the aggressive preset with verbose logging
 PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset aggressive -v
 
+# Merge multiple PDFs matched by a mask into a single output
+PdfCropper.Cli-win-x64.exe "scans/*.pdf" merged/scans.pdf --merge
+
 # From source (cross-platform)
 dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj -- input.pdf output.pdf --preset simple
 ```
@@ -148,8 +151,11 @@ dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csp
 - `-m, --method <0|1>` - Cropping method:
   - `0` = ContentBased (default, analyzes PDF content)
   - `1` = BitmapBased (renders to image, slower but more accurate)
+- `--merge` - Crop every matched input and merge the results into a single PDF. Requires an explicit output file path without wildcards.
 - `-v, --verbose` - Enable verbose logging
 - All low-level switches (`--margin`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
+
+**Tip:** When using `--merge`, the output argument must be a file (for example `merged/book.pdf`). Directory paths or wildcard masks are not allowed because the tool produces one PDF.
 
 ## Cropping Methods Comparison
 

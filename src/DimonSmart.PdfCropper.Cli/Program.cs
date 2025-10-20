@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -48,9 +49,52 @@ static async Task<int> RunAsync(string[] args)
     var inputPath = options.InputPath;
     var outputPath = options.OutputPath;
     var logLevel = options.LogLevel;
+    var mergeIntoSingleOutput = options.MergeIntoSingleOutput;
 
     var inputHasMask = BatchPlanner.ContainsGlobPattern(inputPath);
     var outputHasMask = BatchPlanner.ContainsGlobPattern(outputPath);
+
+    if (mergeIntoSingleOutput)
+    {
+        var logger = new ConsoleLogger(logLevel);
+        IReadOnlyList<string> inputs;
+
+        if (inputHasMask)
+        {
+            var discovery = BatchPlanner.DiscoverInputs(inputPath);
+            if (!discovery.Success)
+            {
+                Console.Error.WriteLine($"Error: {discovery.ErrorMessage}");
+                return discovery.ExitCode;
+            }
+
+            inputs = discovery.Files;
+        }
+        else
+        {
+            if (!File.Exists(inputPath))
+            {
+                Console.Error.WriteLine($"Error: Input file '{inputPath}' was not found.");
+                return 2;
+            }
+
+            inputs = new[] { Path.GetFullPath(inputPath) };
+        }
+
+        if (inputs.Count == 0)
+        {
+            Console.Error.WriteLine("Error: No input files were found for merging.");
+            return 2;
+        }
+
+        logger.LogInfo("Merging files in the following order:");
+        for (var i = 0; i < inputs.Count; i++)
+        {
+            logger.LogInfo($"  {i + 1}. {inputs[i]}");
+        }
+
+        return await MergeFilesAsync(inputs, Path.GetFullPath(outputPath), cropSettings, optimizationSettings, logger);
+    }
 
     if (inputHasMask)
     {
@@ -120,6 +164,8 @@ static void ShowUsage()
     Console.WriteLine("  --clear-info          Remove legacy document info dictionary");
     Console.WriteLine("  --remove-info-key <k> Remove specific document info key (repeatable)");
     Console.WriteLine("  --remove-standard-fonts  Remove embedded files for standard PDF fonts");
+    Console.WriteLine("  --merge              Merge all inputs into a single output PDF");
+    Console.WriteLine("                        Output must be a file path without wildcards");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
     Console.WriteLine("  -l, --log-level <lvl> Logging level:");
     Console.WriteLine("                        none = no logging (default)");
@@ -141,6 +187,7 @@ static void ShowUsage()
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --preset aggressive -v");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
     Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
+    Console.WriteLine("  PdfCropper.Cli scans/*.pdf merged/scans.pdf --merge");
     Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");
 }
 
@@ -172,6 +219,61 @@ static async Task<int> CropFileAsync(
 
         logger.LogInfo($"Writing output file: {outputPath}");
         await File.WriteAllBytesAsync(outputPath, croppedBytes);
+
+        Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
+        return 0;
+    }
+    catch (PdfCropException ex)
+    {
+        logger.LogError($"Cropping failed: {ex.Message}");
+        return MapErrorCode(ex.Code);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError($"Unexpected error: {ex.Message}");
+        logger.LogError($"Stack trace: {ex.StackTrace}");
+        return 99;
+    }
+}
+
+static async Task<int> MergeFilesAsync(
+    IReadOnlyList<string> inputPaths,
+    string outputPath,
+    CropSettings cropSettings,
+    PdfOptimizationSettings optimizationSettings,
+    ConsoleLogger logger)
+{
+    try
+    {
+        var inputBytes = new List<byte[]>(inputPaths.Count);
+        foreach (var input in inputPaths)
+        {
+            if (!File.Exists(input))
+            {
+                Console.Error.WriteLine($"Error: Input file '{input}' was not found.");
+                return 2;
+            }
+
+            logger.LogInfo($"Reading input file: {input}");
+            inputBytes.Add(await File.ReadAllBytesAsync(input));
+        }
+
+        logger.LogInfo($"Cropping and merging {inputPaths.Count} document(s) using {cropSettings.Method} method...");
+        if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
+        {
+            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+        }
+
+        var mergedBytes = await PdfSmartCropper.CropAndMergeAsync(inputBytes, cropSettings, optimizationSettings, logger);
+
+        var targetDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+
+        logger.LogInfo($"Writing output file: {outputPath}");
+        await File.WriteAllBytesAsync(outputPath, mergedBytes);
 
         Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
         return 0;

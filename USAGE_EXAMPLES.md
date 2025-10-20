@@ -191,6 +191,16 @@ PdfCropper.Cli input.pdf output.pdf -m 1 --margin 3.0
 PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 -v
 ```
 
+### Merge Multiple PDFs
+
+```bash
+# Merge every PDF from the scans folder into a single cropped document
+PdfCropper.Cli "scans/*.pdf" merged/scans.pdf --merge
+
+# Output must be a specific file path (wildcards and directories are not allowed)
+PdfCropper.Cli "~/Documents/**/*.pdf" merged/collection.pdf --merge
+```
+
 ## Logger Output Examples
 
 ### ContentBased Method Logging
