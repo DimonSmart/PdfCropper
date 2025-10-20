@@ -99,8 +99,8 @@ The library ships with ready-to-use profiles for common scenarios:
 | Key | Description | Crop settings | Optimization settings |
 |-----|-------------|---------------|-----------------------|
 | `simple` | Default behaviour for quick cropping. | Content-based, keeps edge content, 0.5pt margin. | No extra optimisation (same as `PdfOptimizationSettings.Default`). |
-| `ebook` | Recommended for reading PDFs on e-readers. | Content-based, ignores artefacts that touch the page edge, 1pt margin. | Default optimisation. |
-| `aggressive` | Tight crop plus the strongest clean-up and compression. | Content-based, ignores edge artefacts, 0.25pt margin. | Full compression, smart mode, unused-object removal, metadata cleanup, PDF 1.7 target. |
+| `ebook` | Recommended for reading PDFs on e-readers. | Content-based, ignores artefacts that touch the page edge, excludes repeated content, 1pt margin. | Default optimisation. |
+| `aggressive` | Tight crop plus the strongest clean-up and compression. | Content-based, ignores edge artefacts, excludes repeated content, 0.25pt margin. | Full compression, smart mode, unused-object removal, metadata cleanup, PDF 1.7 target. |
 
 Retrieve a profile via `PdfCropProfiles.Simple`, `PdfCropProfiles.Ebook`, or `PdfCropProfiles.Aggressive`. You can also resolve a profile dynamically by key: `PdfCropProfiles.TryGet("ebook", out var profile)`.
 
