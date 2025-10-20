@@ -72,10 +72,10 @@ Install-Package DimonSmart.PdfCropper
 ```csharp
 using DimonSmart.PdfCropper;
 
-byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes);
+byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, CropSettings.Default);
 ```
 
-The default call uses the `ContentBased` method, keeps a 0.5pt safety margin, and does not touch document metadata.
+`CropSettings.Default` uses the `ContentBased` method, keeps a 0.5pt safety margin, and leaves document metadata untouched.
 
 ### Aggressive crop with all clean-up switches
 
@@ -117,7 +117,7 @@ public sealed class MyLogger : IPdfCropLogger
 }
 
 var logger = new MyLogger();
-byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, CropMethod.ContentBased, logger);
+byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, CropSettings.Default, logger);
 ```
 
 Every overload throws `PdfCropException` with a `PdfCropErrorCode` when the input PDF is invalid, encrypted, or fails to process.

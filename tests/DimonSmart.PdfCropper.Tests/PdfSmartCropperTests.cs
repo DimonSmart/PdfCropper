@@ -24,7 +24,7 @@ public class PdfSmartCropperTests
             document.Add(new Paragraph("Hello cropped world").SetFontSize(24));
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
         var page = result.GetPage(1);
@@ -50,7 +50,7 @@ public class PdfSmartCropperTests
             page.SetTrimBox(page.GetCropBox());
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
         var page = result.GetPage(1);
@@ -82,7 +82,7 @@ public class PdfSmartCropperTests
             canvas.EndText();
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
         var page = result.GetPage(1);
@@ -106,7 +106,7 @@ public class PdfSmartCropperTests
             canvas.AddImageFittedIntoRectangle(imageData, new Rectangle(150, 200, 64, 64), false);
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
         var crop = result.GetPage(1).GetCropBox();
@@ -128,7 +128,7 @@ public class PdfSmartCropperTests
             canvas.Stroke();
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
         var crop = result.GetPage(1).GetCropBox();
@@ -167,7 +167,7 @@ public class PdfSmartCropperTests
             horizontalCanvas.Stroke();
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
 
         using var result = new PdfDocument(new PdfReader(new MemoryStream(cropped)));
 
@@ -252,7 +252,7 @@ public class PdfSmartCropperTests
             }
         });
 
-        var cropped = await PdfSmartCropper.CropAsync(input);
+        var cropped = await PdfSmartCropper.CropAsync(input, CropSettings.Default);
         Assert.NotNull(cropped);
         Assert.True(cropped.Length > 0);
     }
@@ -368,8 +368,81 @@ public class PdfSmartCropperTests
     {
         var encrypted = CreateEncryptedPdf();
 
-        var exception = await Assert.ThrowsAsync<PdfCropException>(() => PdfSmartCropper.CropAsync(encrypted));
+        var exception = await Assert.ThrowsAsync<PdfCropException>(() => PdfSmartCropper.CropAsync(encrypted, CropSettings.Default));
         Assert.Equal(PdfCropErrorCode.EncryptedPdf, exception.Code);
+    }
+
+    [Fact]
+    public async Task CropAndMergeAsync_MergesInputsAndAppliesOptimizations()
+    {
+        var inputOne = CreatePdf(pdf =>
+        {
+            pdf.GetDocumentInfo().SetMoreInfo("CustomKey", "One");
+            var metadataBytes = Encoding.UTF8.GetBytes("<meta>one</meta>");
+            var metadataStream = new PdfStream(metadataBytes);
+            metadataStream.Put(PdfName.Type, PdfName.Metadata);
+            metadataStream.Put(PdfName.Subtype, PdfName.XML);
+            pdf.GetCatalog().Put(PdfName.Metadata, metadataStream);
+
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+            var font = iText.Kernel.Font.PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA);
+            canvas.BeginText();
+            canvas.SetFontAndSize(font, 18);
+            canvas.MoveText(120, 220);
+            canvas.ShowText("First document");
+            canvas.EndText();
+        });
+
+        var inputTwo = CreatePdf(pdf =>
+        {
+            pdf.GetDocumentInfo().SetMoreInfo("CustomKey", "Two");
+            var metadataBytes = Encoding.UTF8.GetBytes("<meta>two</meta>");
+            var metadataStream = new PdfStream(metadataBytes);
+            metadataStream.Put(PdfName.Type, PdfName.Metadata);
+            metadataStream.Put(PdfName.Subtype, PdfName.XML);
+            pdf.GetCatalog().Put(PdfName.Metadata, metadataStream);
+
+            var page = pdf.AddNewPage(PageSize.A4);
+            var canvas = new PdfCanvas(page);
+            var font = iText.Kernel.Font.PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA);
+            canvas.BeginText();
+            canvas.SetFontAndSize(font, 18);
+            canvas.MoveText(360, 480);
+            canvas.ShowText("Second document");
+            canvas.EndText();
+        });
+
+        var cropSettings = new CropSettings(CropMethod.ContentBased);
+        var optimizationSettings = new PdfOptimizationSettings(
+            removeXmpMetadata: true,
+            clearDocumentInfo: true,
+            removeUnusedObjects: true,
+            targetPdfVersion: PdfCompatibilityLevel.Pdf17);
+
+        var merged = await PdfSmartCropper.CropAndMergeAsync(
+            new[] { inputOne, inputTwo },
+            cropSettings,
+            optimizationSettings);
+
+        using var result = new PdfDocument(new PdfReader(new MemoryStream(merged)));
+
+        Assert.Equal(2, result.GetNumberOfPages());
+        Assert.Equal(PdfVersion.PDF_1_7, result.GetPdfVersion());
+
+        var firstPage = result.GetPage(1);
+        var secondPage = result.GetPage(2);
+
+        Assert.True(firstPage.GetCropBox().GetWidth() < firstPage.GetMediaBox().GetWidth());
+        Assert.True(secondPage.GetCropBox().GetWidth() < secondPage.GetMediaBox().GetWidth());
+        Assert.Equal(firstPage.GetCropBox().GetLeft(), firstPage.GetTrimBox().GetLeft(), Precision);
+        Assert.Equal(secondPage.GetCropBox().GetLeft(), secondPage.GetTrimBox().GetLeft(), Precision);
+        Assert.True(firstPage.GetCropBox().GetLeft() < secondPage.GetCropBox().GetLeft());
+
+        Assert.True(string.IsNullOrEmpty(result.GetDocumentInfo().GetMoreInfo("CustomKey")));
+
+        var metadata = result.GetCatalog().GetPdfObject().GetAsStream(PdfName.Metadata);
+        Assert.Null(metadata);
     }
 
     private static byte[] CreatePdf(Action<PdfDocument> builder)
