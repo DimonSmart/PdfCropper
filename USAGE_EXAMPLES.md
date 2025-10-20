@@ -9,7 +9,7 @@ using PdfCropper;
 
 // Simplest way - uses ContentBased method (default)
 byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
-byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf);
+byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, CropSettings.Default);
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
 
@@ -20,8 +20,8 @@ using PdfCropper;
 
 byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
 byte[] croppedPdf = await PdfSmartCropper.CropAsync(
-    inputPdf, 
-    CropMethod.BitmapBased
+    inputPdf,
+    new CropSettings(CropMethod.BitmapBased)
 );
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
@@ -68,7 +68,7 @@ using var logger = new FileLogger("crop_log.txt");
 
 byte[] croppedPdf = await PdfSmartCropper.CropAsync(
     inputPdf, 
-    CropMethod.ContentBased,
+    CropSettings.Default,
     logger
 );
 
@@ -87,7 +87,7 @@ try
     byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
     byte[] croppedPdf = await PdfSmartCropper.CropAsync(
         inputPdf, 
-        CropMethod.ContentBased,
+        CropSettings.Default,
         logger: null,
         cts.Token
     );
@@ -107,7 +107,7 @@ using PdfCropper;
 try
 {
     byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
-    byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf);
+    byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, CropSettings.Default);
     await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 }
 catch (PdfCropException ex) when (ex.Code == PdfCropErrorCode.EncryptedPdf)
