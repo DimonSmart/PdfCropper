@@ -41,6 +41,8 @@ public static class BatchPlanner
             return BatchPlanningResult.Failure($"No files matched the mask '{inputPattern}'.", 2);
         }
 
+        var orderedRelativePaths = SortMatches(matches);
+
         var outputHasMask = ContainsGlobPattern(outputPattern);
         var outputLooksLikeDirectory = !outputHasMask && LooksLikeDirectory(outputPattern);
 
@@ -56,9 +58,8 @@ public static class BatchPlanner
             var comparer = CreatePathComparer();
             var producedOutputs = new HashSet<string>(comparer);
 
-            foreach (var match in matches)
+            foreach (var relativePath in orderedRelativePaths)
             {
-                var relativePath = NormalizeForMatcher(match.Path);
                 var matchResult = regex.Match(relativePath);
                 if (!matchResult.Success)
                 {
@@ -93,9 +94,8 @@ public static class BatchPlanner
             var targetDirectory = Path.GetFullPath(outputPattern);
             var operations = new List<PlannedFile>(matches.Count);
 
-            foreach (var match in matches)
+            foreach (var relativePath in orderedRelativePaths)
             {
-                var relativePath = NormalizeForMatcher(match.Path);
                 var fullInputPath = Path.GetFullPath(Path.Combine(baseDirectory, ToSystemPath(relativePath)));
                 var fullOutputPath = Path.GetFullPath(Path.Combine(targetDirectory, ToSystemPath(relativePath)));
                 operations.Add(new PlannedFile(fullInputPath, fullOutputPath));
@@ -104,17 +104,55 @@ public static class BatchPlanner
             return BatchPlanningResult.CreateSuccess(operations);
         }
 
-        if (matches.Count > 1)
+        if (orderedRelativePaths.Count > 1)
         {
             return BatchPlanningResult.Failure("Multiple files match the input mask. Provide an output mask or a directory path to avoid overwriting.", 1);
         }
 
-        var singleMatch = matches[0];
-        var singleRelative = NormalizeForMatcher(singleMatch.Path);
+        var singleRelative = orderedRelativePaths[0];
         var singleInput = Path.GetFullPath(Path.Combine(baseDirectory, ToSystemPath(singleRelative)));
         var singleOutput = Path.GetFullPath(outputPattern);
 
         return BatchPlanningResult.CreateSuccess(new[] { new PlannedFile(singleInput, singleOutput) });
+    }
+
+    public static InputDiscoveryResult DiscoverInputs(string inputPattern)
+    {
+        if (string.IsNullOrWhiteSpace(inputPattern))
+        {
+            return InputDiscoveryResult.Failure("Input mask cannot be empty.", 1);
+        }
+
+        var (baseDirectory, relativePattern) = ExtractBaseDirectory(inputPattern);
+        if (!Directory.Exists(baseDirectory))
+        {
+            return InputDiscoveryResult.Failure($"Input directory '{baseDirectory}' was not found.", 2);
+        }
+
+        var normalizedPattern = NormalizeForMatcher(relativePattern);
+        var matcher = OperatingSystem.IsWindows()
+            ? new Matcher(StringComparison.OrdinalIgnoreCase)
+            : new Matcher(StringComparison.Ordinal);
+        matcher.AddInclude(normalizedPattern);
+
+        var directoryInfo = new DirectoryInfo(baseDirectory);
+        var result = matcher.Execute(new DirectoryInfoWrapper(directoryInfo));
+        var matches = result.Files.ToList();
+        if (matches.Count == 0)
+        {
+            return InputDiscoveryResult.Failure($"No files matched the mask '{inputPattern}'.", 2);
+        }
+
+        var orderedRelativePaths = SortMatches(matches);
+
+        var inputs = new List<string>(orderedRelativePaths.Count);
+        foreach (var relativePath in orderedRelativePaths)
+        {
+            var fullInputPath = Path.GetFullPath(Path.Combine(baseDirectory, ToSystemPath(relativePath)));
+            inputs.Add(fullInputPath);
+        }
+
+        return InputDiscoveryResult.CreateSuccess(inputs);
     }
 
     internal static Regex GlobToRegex(string pattern, out int wildcardCount)
@@ -240,6 +278,15 @@ public static class BatchPlanner
 
     private static string NormalizeForMatcher(string value) => value.Replace('\\', '/');
 
+    private static List<string> SortMatches(List<FilePatternMatch> matches)
+    {
+        var comparer = CreatePathComparer();
+        return matches
+            .Select(match => NormalizeForMatcher(match.Path))
+            .OrderBy(path => path, comparer)
+            .ToList();
+    }
+
     private static string ToSystemPath(string value) => value.Replace('/', Path.DirectorySeparatorChar);
 
     private static bool LooksLikeDirectory(string path)
@@ -275,4 +322,17 @@ public sealed record BatchPlanningResult(IReadOnlyList<PlannedFile> Files, strin
     }
 
     public static BatchPlanningResult Failure(string message, int exitCode) => new(Array.Empty<PlannedFile>(), message, exitCode);
+}
+
+public sealed record InputDiscoveryResult(IReadOnlyList<string> Files, string? ErrorMessage, int ExitCode)
+{
+    public bool Success => ErrorMessage is null;
+
+    public static InputDiscoveryResult CreateSuccess(IEnumerable<string> files)
+    {
+        var list = files as IReadOnlyList<string> ?? files.ToList();
+        return new InputDiscoveryResult(list, null, 0);
+    }
+
+    public static InputDiscoveryResult Failure(string message, int exitCode) => new(Array.Empty<string>(), message, exitCode);
 }
