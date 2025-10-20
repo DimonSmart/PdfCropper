@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using Microsoft.Extensions.Logging;
 using DimonSmart.PdfCropper;
 
@@ -13,13 +14,15 @@ internal sealed class CommandLineOptions
         string outputPath,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
-        LogLevel logLevel)
+        LogLevel logLevel,
+        bool mergeIntoSingleOutput)
     {
         InputPath = inputPath;
         OutputPath = outputPath;
         CropSettings = cropSettings;
         OptimizationSettings = optimizationSettings;
         LogLevel = logLevel;
+        MergeIntoSingleOutput = mergeIntoSingleOutput;
     }
 
     public string InputPath { get; }
@@ -31,6 +34,8 @@ internal sealed class CommandLineOptions
     public PdfOptimizationSettings OptimizationSettings { get; }
 
     public LogLevel LogLevel { get; }
+
+    public bool MergeIntoSingleOutput { get; }
 }
 
 internal sealed class CommandLineParseResult
@@ -92,6 +97,7 @@ internal static class CommandLineParser
         var infoKeys = new List<string>();
         var logLevel = LogLevel.None;
         PdfCompatibilityLevel? targetPdfVersion = null;
+        var mergeIntoSingleOutput = false;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -254,8 +260,25 @@ internal static class CommandLineParser
                     removeEmbeddedStandardFonts = true;
                     break;
 
+                case "--merge":
+                    mergeIntoSingleOutput = true;
+                    break;
+
                 default:
                     return CommandLineParseResult.Failure($"Unknown argument '{current}'");
+            }
+        }
+
+        if (mergeIntoSingleOutput)
+        {
+            if (BatchPlanner.ContainsGlobPattern(outputPath))
+            {
+                return CommandLineParseResult.Failure("The --merge option requires a single output file path without wildcards. Provide a literal file name for the merged result.");
+            }
+
+            if (LooksLikeDirectory(outputPath))
+            {
+                return CommandLineParseResult.Failure("The --merge option produces one PDF file. Provide a destination file path instead of a directory.");
             }
         }
 
@@ -271,8 +294,23 @@ internal static class CommandLineParser
             removeEmbeddedStandardFonts,
             targetPdfVersion);
 
-        var options = new CommandLineOptions(inputPath, outputPath, cropSettings, optimizationSettings, logLevel);
+        var options = new CommandLineOptions(inputPath, outputPath, cropSettings, optimizationSettings, logLevel, mergeIntoSingleOutput);
         return CommandLineParseResult.Ok(options);
+    }
+
+    private static bool LooksLikeDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        if (path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            return true;
+        }
+
+        return Directory.Exists(path);
     }
 
     private static bool TryParseCompressionLevel(string value, out int level)

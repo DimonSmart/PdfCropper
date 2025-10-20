@@ -9,7 +9,7 @@ using PdfCropper;
 
 // Simplest way - uses ContentBased method (default)
 byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
-byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf);
+byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, CropSettings.Default);
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
 
@@ -20,8 +20,8 @@ using PdfCropper;
 
 byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
 byte[] croppedPdf = await PdfSmartCropper.CropAsync(
-    inputPdf, 
-    CropMethod.BitmapBased
+    inputPdf,
+    new CropSettings(CropMethod.BitmapBased)
 );
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
@@ -68,7 +68,7 @@ using var logger = new FileLogger("crop_log.txt");
 
 byte[] croppedPdf = await PdfSmartCropper.CropAsync(
     inputPdf, 
-    CropMethod.ContentBased,
+    CropSettings.Default,
     logger
 );
 
@@ -87,7 +87,7 @@ try
     byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
     byte[] croppedPdf = await PdfSmartCropper.CropAsync(
         inputPdf, 
-        CropMethod.ContentBased,
+        CropSettings.Default,
         logger: null,
         cts.Token
     );
@@ -107,7 +107,7 @@ using PdfCropper;
 try
 {
     byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
-    byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf);
+    byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, CropSettings.Default);
     await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 }
 catch (PdfCropException ex) when (ex.Code == PdfCropErrorCode.EncryptedPdf)
@@ -189,6 +189,16 @@ PdfCropper.Cli input.pdf output.pdf -m 1 --margin 3.0
 
 # ContentBased excluding edge content with large margin
 PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 -v
+```
+
+### Merge Multiple PDFs
+
+```bash
+# Merge every PDF from the scans folder into a single cropped document
+PdfCropper.Cli "scans/*.pdf" merged/scans.pdf --merge
+
+# Output must be a specific file path (wildcards and directories are not allowed)
+PdfCropper.Cli "~/Documents/**/*.pdf" merged/collection.pdf --merge
 ```
 
 ## Logger Output Examples

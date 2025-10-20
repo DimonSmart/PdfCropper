@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace DimonSmart.PdfCropper;
 
 /// <summary>
@@ -14,5 +16,16 @@ public sealed class PdfCropper : IPdfCropper
         CancellationToken ct = default)
     {
         return PdfSmartCropper.CropAsync(inputPdf, cropSettings, optimizationSettings, logger, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<byte[]> CropAndMergeAsync(
+        IEnumerable<byte[]> inputs,
+        CropSettings cropSettings,
+        PdfOptimizationSettings optimizationSettings,
+        IPdfCropLogger? logger = null,
+        CancellationToken ct = default)
+    {
+        return PdfSmartCropper.CropAndMergeAsync(inputs, cropSettings, optimizationSettings, logger, ct);
     }
 }
