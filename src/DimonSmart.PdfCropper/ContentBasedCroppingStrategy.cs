@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
@@ -11,6 +12,41 @@ namespace DimonSmart.PdfCropper;
 /// </summary>
 internal static class ContentBasedCroppingStrategy
 {
+    private const double BoundsQuantizationScale = 100d;
+
+    public static PageContentAnalysis AnalyzePage(
+        PdfPage page,
+        bool excludeEdgeTouchingObjects,
+        float edgeExclusionTolerance,
+        CancellationToken ct,
+        IReadOnlySet<ContentObjectKey>? ignoredObjects = null)
+    {
+        var collector = new ContentBoundingBoxCollector(
+            page.GetPageSize(),
+            excludeEdgeTouchingObjects,
+            edgeExclusionTolerance,
+            ignoredObjects,
+            ct);
+        var processor = new PdfCanvasProcessor(collector);
+        processor.ProcessPageContent(page);
+
+        return new PageContentAnalysis(collector.Objects);
+    }
+
+    public static BoundingBox? CalculateBounds(PageContentAnalysis analysis)
+    {
+        BoundingBox? bounds = null;
+
+        foreach (var detectedObject in analysis.Objects)
+        {
+            bounds = bounds.HasValue
+                ? bounds.Value.Include(detectedObject.Bounds)
+                : detectedObject.Bounds;
+        }
+
+        return bounds;
+    }
+
     /// <summary>
     /// Crops a page based on its content elements.
     /// </summary>
@@ -21,6 +57,7 @@ internal static class ContentBasedCroppingStrategy
     /// <param name="margin">Margin to add around content bounds.</param>
     /// <param name="edgeExclusionTolerance">Tolerance for considering content as touching a page edge.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="ignoredObjects">Set of content keys to exclude from bounds calculation.</param>
     /// <returns>The crop rectangle, or null if no content found.</returns>
     public static Rectangle? CropPage(
         PdfPage page,
@@ -29,13 +66,11 @@ internal static class ContentBasedCroppingStrategy
         bool excludeEdgeTouchingObjects,
         float margin,
         float edgeExclusionTolerance,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlySet<ContentObjectKey>? ignoredObjects = null)
     {
-        var collector = new ContentBoundingBoxCollector(page.GetPageSize(), excludeEdgeTouchingObjects, edgeExclusionTolerance, ct);
-        var processor = new PdfCanvasProcessor(collector);
-        processor.ProcessPageContent(page);
-
-        var bounds = collector.Bounds;
+        var analysis = AnalyzePage(page, excludeEdgeTouchingObjects, edgeExclusionTolerance, ct, ignoredObjects);
+        var bounds = CalculateBounds(analysis);
         if (!bounds.HasValue)
         {
             return null;
@@ -46,7 +81,7 @@ internal static class ContentBasedCroppingStrategy
         return bounds.Value.ToRectangle(page.GetPageSize(), margin);
     }
 
-    private readonly struct BoundingBox(double minX, double minY, double maxX, double maxY)
+    internal readonly struct BoundingBox(double minX, double minY, double maxX, double maxY)
     {
         public double MinX { get; } = minX;
 
@@ -55,6 +90,16 @@ internal static class ContentBasedCroppingStrategy
         public double MaxX { get; } = maxX;
 
         public double MaxY { get; } = maxY;
+
+        public BoundingBox Include(BoundingBox other)
+        {
+            var minX = Math.Min(MinX, other.MinX);
+            var minY = Math.Min(MinY, other.MinY);
+            var maxX = Math.Max(MaxX, other.MaxX);
+            var maxY = Math.Max(MaxY, other.MaxY);
+
+            return new BoundingBox(minX, minY, maxX, maxY);
+        }
 
         public Rectangle? ToRectangle(Rectangle pageBox, float margin)
         {
@@ -75,7 +120,56 @@ internal static class ContentBasedCroppingStrategy
         }
     }
 
-    private sealed class ContentBoundingBoxCollector(Rectangle pageBox, bool excludeEdgeTouchingObjects, float edgeExclusionTolerance, CancellationToken ct) : IEventListener
+    internal sealed class PageContentAnalysis
+    {
+        public PageContentAnalysis(IReadOnlyList<DetectedContentObject> objects)
+        {
+            Objects = objects;
+        }
+
+        public IReadOnlyList<DetectedContentObject> Objects { get; }
+    }
+
+    internal readonly record struct ContentObjectKey(ContentObjectType Type, QuantizedBounds Bounds, string? Text, long? ImageResourceId, int? PathHash);
+
+    internal enum ContentObjectType
+    {
+        Text,
+        Image,
+        Path
+    }
+
+    internal readonly record struct QuantizedBounds(long MinX, long MinY, long MaxX, long MaxY)
+    {
+        public static QuantizedBounds FromBoundingBox(BoundingBox bounds)
+        {
+            return new QuantizedBounds(
+                Quantize(bounds.MinX),
+                Quantize(bounds.MinY),
+                Quantize(bounds.MaxX),
+                Quantize(bounds.MaxY));
+        }
+    }
+
+    internal readonly struct DetectedContentObject
+    {
+        public DetectedContentObject(BoundingBox bounds, ContentObjectKey key)
+        {
+            Bounds = bounds;
+            Key = key;
+        }
+
+        public BoundingBox Bounds { get; }
+
+        public ContentObjectKey Key { get; }
+    }
+
+    private sealed class ContentBoundingBoxCollector(
+        Rectangle pageBox,
+        bool excludeEdgeTouchingObjects,
+        float edgeExclusionTolerance,
+        IReadOnlySet<ContentObjectKey>? ignoredObjects,
+        CancellationToken ct) : IEventListener
     {
         private static readonly ICollection<EventType> SupportedEvents = new[]
         {
@@ -86,14 +180,10 @@ internal static class ContentBasedCroppingStrategy
         private readonly Rectangle _pageBox = pageBox;
         private readonly bool _excludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
         private readonly double _edgeExclusionTolerance = edgeExclusionTolerance;
-        private double? _minX;
-        private double? _minY;
-        private double? _maxX;
-        private double? _maxY;
+        private readonly IReadOnlySet<ContentObjectKey>? _ignoredObjects = ignoredObjects;
+        private readonly List<DetectedContentObject> _objects = new();
 
-        public BoundingBox? Bounds => _minX.HasValue && _minY.HasValue && _maxX.HasValue && _maxY.HasValue
-            ? new BoundingBox(_minX.Value, _minY.Value, _maxX.Value, _maxY.Value)
-            : null;
+        public IReadOnlyList<DetectedContentObject> Objects => _objects;
 
         public void EventOccurred(IEventData data, EventType type)
         {
@@ -127,7 +217,8 @@ internal static class ContentBasedCroppingStrategy
                 builder.Include(characterInfo.GetDescentLine());
             }
 
-            CommitBounds(builder, 0, 0);
+            var text = info.GetText();
+            CommitBounds(builder, 0, 0, new ContentObjectMetadata(ContentObjectType.Text, text, null, null));
         }
 
         private void HandleImage(ImageRenderInfo info)
@@ -148,7 +239,13 @@ internal static class ContentBasedCroppingStrategy
             builder.Include(TransformPoint(0, height, matrix));
             builder.Include(TransformPoint(width, height, matrix));
 
-            CommitBounds(builder, 0, 0);
+            long? imageObjectId = null;
+            if (image != null)
+            {
+                imageObjectId = image.GetPdfObject()?.GetIndirectReference()?.GetObjNumber();
+            }
+
+            CommitBounds(builder, 0, 0, new ContentObjectMetadata(ContentObjectType.Image, null, imageObjectId, null));
         }
 
         private void HandlePath(PathRenderInfo info)
@@ -205,45 +302,33 @@ internal static class ContentBasedCroppingStrategy
                 }
             }
 
-            CommitBounds(builder, strokeExpandX, strokeExpandY);
+            var pathHash = CalculatePathSignature(path, matrix, info.GetOperation());
+            CommitBounds(builder, strokeExpandX, strokeExpandY, new ContentObjectMetadata(ContentObjectType.Path, null, null, pathHash));
         }
 
-        private void CommitBounds(BoundsBuilder builder, double expandX, double expandY)
+        private void CommitBounds(BoundsBuilder builder, double expandX, double expandY, ContentObjectMetadata metadata)
         {
             if (!builder.TryBuild(expandX, expandY, out var bounds))
             {
                 return;
             }
 
-            RegisterBounds(bounds);
+            RegisterBounds(bounds, metadata);
         }
 
-        private void RegisterBounds(BoundingBox bounds)
+        private void RegisterBounds(BoundingBox bounds, ContentObjectMetadata metadata)
         {
             if (_excludeEdgeTouchingObjects && TouchesPageEdge(bounds))
             {
                 return;
             }
 
-            if (!_minX.HasValue || bounds.MinX < _minX)
+            var key = CreateKey(bounds, metadata);
+            if (_ignoredObjects != null && _ignoredObjects.Contains(key))
             {
-                _minX = bounds.MinX;
+                return;
             }
-
-            if (!_minY.HasValue || bounds.MinY < _minY)
-            {
-                _minY = bounds.MinY;
-            }
-
-            if (!_maxX.HasValue || bounds.MaxX > _maxX)
-            {
-                _maxX = bounds.MaxX;
-            }
-
-            if (!_maxY.HasValue || bounds.MaxY > _maxY)
-            {
-                _maxY = bounds.MaxY;
-            }
+            _objects.Add(new DetectedContentObject(bounds, key));
         }
 
         private bool TouchesPageEdge(BoundingBox bounds)
@@ -257,6 +342,52 @@ internal static class ContentBasedCroppingStrategy
                    bounds.MinY <= bottom + _edgeExclusionTolerance ||
                    bounds.MaxX >= right - _edgeExclusionTolerance ||
                    bounds.MaxY >= top - _edgeExclusionTolerance;
+        }
+
+        private static ContentObjectKey CreateKey(BoundingBox bounds, ContentObjectMetadata metadata)
+        {
+            var quantizedBounds = QuantizedBounds.FromBoundingBox(bounds);
+            return new ContentObjectKey(metadata.Type, quantizedBounds, metadata.Text, metadata.ImageResourceId, metadata.PathHash);
+        }
+
+        private static int? CalculatePathSignature(iText.Kernel.Geom.Path path, Matrix? matrix, int operation)
+        {
+            if (path == null)
+            {
+                return null;
+            }
+
+            var hash = new HashCode();
+            hash.Add(operation);
+
+            foreach (var subpath in path.GetSubpaths())
+            {
+                var startPoint = TransformPoint(subpath.GetStartPoint(), matrix);
+                if (startPoint != null)
+                {
+                    AddVector(ref hash, startPoint);
+                }
+
+                foreach (var segment in subpath.GetSegments())
+                {
+                    foreach (var point in segment.GetBasePoints())
+                    {
+                        var transformed = TransformPoint(point, matrix);
+                        if (transformed != null)
+                        {
+                            AddVector(ref hash, transformed);
+                        }
+                    }
+                }
+            }
+
+            return hash.ToHashCode();
+        }
+
+        private static void AddVector(ref HashCode hash, Vector vector)
+        {
+            hash.Add(Quantize(vector.Get(Vector.I1)));
+            hash.Add(Quantize(vector.Get(Vector.I2)));
         }
 
         private static Vector? TransformPoint(Point? point, Matrix? matrix)
@@ -349,4 +480,11 @@ internal static class ContentBasedCroppingStrategy
             }
         }
     }
+
+    private static long Quantize(double value)
+    {
+        return (long)Math.Round(value * BoundsQuantizationScale, MidpointRounding.AwayFromZero);
+    }
+
+    private readonly record struct ContentObjectMetadata(ContentObjectType Type, string? Text, long? ImageResourceId, int? PathHash);
 }

@@ -99,7 +99,27 @@ catch (OperationCanceledException)
 }
 ```
 
-### 5. Error Handling
+### 5. Repeated Content Detection
+
+```csharp
+using PdfCropper;
+
+// Exclude objects that appear on most pages (e.g., headers, footers, watermarks)
+var settingsWithRepeatedDetection = new CropSettings(
+    CropMethod.ContentBased,
+    excludeEdgeTouchingObjects: true,
+    margin: 1.0f,
+    detectRepeatedObjects: true,
+    repeatedObjectOccurrenceThreshold: 90.0, // Objects present on 90%+ of pages
+    repeatedObjectMinimumPageCount: 3 // Only apply to docs with 3+ pages
+);
+
+byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
+byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, settingsWithRepeatedDetection);
+await File.WriteAllBytesAsync("output.pdf", croppedPdf);
+```
+
+### 6. Error Handling
 
 ```csharp
 using PdfCropper;
@@ -173,6 +193,26 @@ PdfCropper.Cli input.pdf output.pdf -v
 # [INFO] Page 1/5: Crop box = (71.50, 99.50, 469.00, 601.00)
 # [INFO] Page 1/5: New size = 469.00 x 601.00 pts
 # ...
+```
+
+### Repeated Content Detection
+
+```bash
+# Enable detection of repeated content (headers, footers, watermarks)
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on -v
+
+# Disable detection of repeated content
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects off -v
+
+# Detect objects that appear on 85% or more pages
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-threshold 85
+
+# Only apply repeated detection to documents with 5 or more pages
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-min-pages 5
+
+# Use presets that include repeated detection (default threshold: 40%)
+PdfCropper.Cli input.pdf output.pdf --preset ebook -v  # Detects repeated content
+PdfCropper.Cli input.pdf output.pdf --preset aggressive -v  # Detects repeated content
 ```
 
 ### All Options Combined
