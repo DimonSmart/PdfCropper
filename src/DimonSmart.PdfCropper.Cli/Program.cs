@@ -154,9 +154,8 @@ static void ShowUsage()
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
     Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
-    Console.WriteLine("  --detect-repeated     Exclude content repeated on most pages (content-based only)");
-    Console.WriteLine("  --no-detect-repeated  Disable repeated content exclusion (overrides presets)");
-    Console.WriteLine("  --repeated-threshold <percent>  Minimum percentage of pages for repeated content (default: 99)");
+    Console.WriteLine("  --detect-repeated-objects <on|off>  Exclude content repeated on most pages (content-based only)");
+    Console.WriteLine("  --repeated-threshold <percent>  Minimum percentage of pages for repeated content (default: 40)");
     Console.WriteLine("  --repeated-min-pages <count>    Minimum document pages before detection (default: 3)");
     Console.WriteLine("  --compression-level <level>  Deflate compression level (NO_COMPRESSION, DEFAULT_COMPRESSION, BEST_SPEED, BEST_COMPRESSION)");
     Console.WriteLine("                        Note: For maximum size reduction, combine with --full-compression, --smart, --remove-unused");

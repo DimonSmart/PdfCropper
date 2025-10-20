@@ -155,12 +155,18 @@ internal static class CommandLineParser
 
                     break;
 
-                case "--detect-repeated":
-                    detectRepeated = true;
-                    break;
+                case "--detect-repeated-objects":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--detect-repeated-objects requires a value (on or off)");
+                    }
 
-                case "--no-detect-repeated":
-                    detectRepeated = false;
+                    var detectRepeatedValue = args[++i];
+                    if (!TryParseOnOff(detectRepeatedValue, out detectRepeated))
+                    {
+                        return CommandLineParseResult.Failure("--detect-repeated-objects value must be 'on' or 'off'");
+                    }
+
                     break;
 
                 case "--repeated-threshold":
@@ -453,5 +459,32 @@ internal static class CommandLineParser
         }
 
         return false;
+    }
+
+    private static bool TryParseOnOff(string value, out bool result)
+    {
+        result = false;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "on":
+            case "true":
+            case "yes":
+            case "1":
+                result = true;
+                return true;
+            case "off":
+            case "false":
+            case "no":
+            case "0":
+                result = false;
+                return true;
+            default:
+                return false;
+        }
     }
 }

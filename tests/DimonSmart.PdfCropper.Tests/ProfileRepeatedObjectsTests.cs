@@ -19,6 +19,7 @@ namespace DimonSmart.PdfCropper.Tests
             Assert.True(profile.CropSettings.DetectRepeatedObjects);
             Assert.True(profile.CropSettings.ExcludeEdgeTouchingObjects);
             Assert.Equal(1.0f, profile.CropSettings.Margin);
+            Assert.Equal(40.0, profile.CropSettings.RepeatedObjectOccurrenceThreshold);
         }
 
         [Fact]
@@ -28,6 +29,7 @@ namespace DimonSmart.PdfCropper.Tests
             Assert.True(profile.CropSettings.DetectRepeatedObjects);
             Assert.True(profile.CropSettings.ExcludeEdgeTouchingObjects);
             Assert.Equal(0.25f, profile.CropSettings.Margin);
+            Assert.Equal(40.0, profile.CropSettings.RepeatedObjectOccurrenceThreshold);
         }
 
         [Fact]
@@ -41,6 +43,13 @@ namespace DimonSmart.PdfCropper.Tests
 
             Assert.True(PdfCropProfiles.TryGet("simple", out var simple));
             Assert.False(simple.CropSettings.DetectRepeatedObjects);
+        }
+
+        [Fact]
+        public void CropSettingsDefault_ShouldHaveCorrectRepeatedThreshold()
+        {
+            var defaultSettings = CropSettings.Default;
+            Assert.Equal(40.0, defaultSettings.RepeatedObjectOccurrenceThreshold);
         }
     }
 }

@@ -199,18 +199,18 @@ PdfCropper.Cli input.pdf output.pdf -v
 
 ```bash
 # Enable detection of repeated content (headers, footers, watermarks)
-PdfCropper.Cli input.pdf output.pdf --detect-repeated -v
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on -v
+
+# Disable detection of repeated content
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects off -v
 
 # Detect objects that appear on 85% or more pages
-PdfCropper.Cli input.pdf output.pdf --detect-repeated --repeated-threshold 85
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-threshold 85
 
 # Only apply repeated detection to documents with 5 or more pages
-PdfCropper.Cli input.pdf output.pdf --detect-repeated --repeated-min-pages 5
+PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-min-pages 5
 
-# Disable repeated detection (overrides preset settings)
-PdfCropper.Cli input.pdf output.pdf --preset ebook --no-detect-repeated
-
-# Use presets that include repeated detection
+# Use presets that include repeated detection (default threshold: 40%)
 PdfCropper.Cli input.pdf output.pdf --preset ebook -v  # Detects repeated content
 PdfCropper.Cli input.pdf output.pdf --preset aggressive -v  # Detects repeated content
 ```

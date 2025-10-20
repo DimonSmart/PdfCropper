@@ -25,7 +25,7 @@ public readonly struct CropSettings
         float margin = 0.5f,
         float edgeExclusionTolerance = 1.0f,
         bool detectRepeatedObjects = false,
-        double repeatedObjectOccurrenceThreshold = 99.0,
+        double repeatedObjectOccurrenceThreshold = 40.0,
         int repeatedObjectMinimumPageCount = 3)
     {
         Method = method;

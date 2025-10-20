@@ -89,7 +89,7 @@ public static class PdfCropProfiles
             EbookKey,
             "Edge-aware e-book crop",
             "Optimized for e-book readers: ignore edge-touching artefacts, exclude repeated content, and keep a comfortable 1pt margin.",
-            new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true, margin: 1.0f, detectRepeatedObjects: true),
+            new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true, margin: 1.0f, detectRepeatedObjects: true, repeatedObjectOccurrenceThreshold: 40.0),
             PdfOptimizationSettings.Default);
 
         var aggressiveOptimization = new PdfOptimizationSettings(
@@ -107,7 +107,7 @@ public static class PdfCropProfiles
             AggressiveKey,
             "Aggressive crop + optimize",
             "Maximum size reduction: tight crop, exclude repeated content, all clean-up toggles on, and strongest compression.",
-            new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true, margin: 0.25f, detectRepeatedObjects: true),
+            new CropSettings(CropMethod.ContentBased, excludeEdgeTouchingObjects: true, margin: 0.25f, detectRepeatedObjects: true, repeatedObjectOccurrenceThreshold: 40.0),
             aggressiveOptimization);
 
         var profiles = new[]
