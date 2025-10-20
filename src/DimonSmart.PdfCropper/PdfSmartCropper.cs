@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using iText.Kernel.Exceptions;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
@@ -274,6 +275,17 @@ public static class PdfSmartCropper
             logger.LogInfo($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection");
         }
 
+        var shouldDetectRepeatedObjects =
+            cropSettings.Method == CropMethod.ContentBased &&
+            cropSettings.DetectRepeatedObjects &&
+            pageCount >= cropSettings.RepeatedObjectMinimumPageCount;
+
+        var repeatedDetectionAnalyses = shouldDetectRepeatedObjects
+            ? new ContentBasedCroppingStrategy.PageContentAnalysis?[pageCount]
+            : null;
+        var pageDurations = new TimeSpan[pageCount];
+        var skippedPages = new bool[pageCount];
+
         for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
         {
             ct.ThrowIfCancellationRequested();
@@ -287,20 +299,56 @@ public static class PdfSmartCropper
             {
                 logger.LogWarning($"Page {pageIndex}: Skipped (empty page)");
                 pageStopwatch.Stop();
-                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
+                var elapsed = pageStopwatch.Elapsed;
+                pageDurations[pageIndex - 1] = elapsed;
+                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(elapsed)}");
+                skippedPages[pageIndex - 1] = true;
                 continue;
             }
 
+            if (shouldDetectRepeatedObjects)
+            {
+                repeatedDetectionAnalyses![pageIndex - 1] = ContentBasedCroppingStrategy.AnalyzePage(
+                    page,
+                    cropSettings.ExcludeEdgeTouchingObjects,
+                    cropSettings.EdgeExclusionTolerance,
+                    ct);
+            }
+
+            pageStopwatch.Stop();
+            pageDurations[pageIndex - 1] = pageStopwatch.Elapsed;
+        }
+
+        IReadOnlySet<ContentBasedCroppingStrategy.ContentObjectKey>? repeatedObjects = null;
+        if (shouldDetectRepeatedObjects)
+        {
+            var detected = RepeatedContentDetector.Detect(
+                repeatedDetectionAnalyses!,
+                cropSettings.RepeatedObjectOccurrenceThreshold,
+                ct);
+            if (detected.Count > 0)
+            {
+                repeatedObjects = detected;
+                var analyzedPages = repeatedDetectionAnalyses!.Count(static analysis => analysis != null);
+                logger.LogInfo($"Identified {detected.Count} repeated content object(s) across {analyzedPages} analyzed page(s)");
+            }
+        }
+
+        for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+        {
+            if (skippedPages[pageIndex - 1])
+            {
+                continue;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            var page = pdfDocument.GetPage(pageIndex);
+            var pageStopwatch = Stopwatch.StartNew();
+            var pageSize = page.GetPageSize();
+
             Rectangle? cropRectangle = cropSettings.Method switch
             {
-                CropMethod.ContentBased => ContentBasedCroppingStrategy.CropPage(
-                    page,
-                    logger,
-                    pageIndex,
-                    cropSettings.ExcludeEdgeTouchingObjects,
-                    cropSettings.Margin,
-                    cropSettings.EdgeExclusionTolerance,
-                    ct),
+                CropMethod.ContentBased => null,
                 CropMethod.BitmapBased when BitmapBasedCroppingStrategy.IsSupportedOnCurrentPlatform() =>
 #pragma warning disable CA1416 // Validate platform compatibility
                     BitmapBasedCroppingStrategy.CropPage(
@@ -317,11 +365,27 @@ public static class PdfSmartCropper
                 _ => throw new ArgumentOutOfRangeException(nameof(cropSettings.Method), cropSettings.Method, "Unknown crop method"),
             };
 
+            if (cropSettings.Method == CropMethod.ContentBased)
+            {
+                var analysis = ContentBasedCroppingStrategy.AnalyzePage(
+                    page,
+                    cropSettings.ExcludeEdgeTouchingObjects,
+                    cropSettings.EdgeExclusionTolerance,
+                    ct,
+                    repeatedObjects);
+                var bounds = ContentBasedCroppingStrategy.CalculateBounds(analysis);
+                if (bounds.HasValue)
+                {
+                    logger.LogInfo($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})");
+                    cropRectangle = bounds.Value.ToRectangle(pageSize, cropSettings.Margin);
+                }
+            }
+
             if (cropRectangle == null)
             {
                 logger.LogWarning($"Page {pageIndex}: No crop applied (no content bounds found)");
-                pageStopwatch.Stop();
-                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
+                var totalTime = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
+                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}");
                 continue;
             }
 
@@ -333,7 +397,8 @@ public static class PdfSmartCropper
             logger.LogInfo($"Page {pageIndex}: Cropped size = {cropRectangle.GetWidth():F2} x {cropRectangle.GetHeight():F2} pts");
 
             pageStopwatch.Stop();
-            logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(pageStopwatch.Elapsed)}");
+            var totalDuration = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
+            logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}");
         }
     }
 

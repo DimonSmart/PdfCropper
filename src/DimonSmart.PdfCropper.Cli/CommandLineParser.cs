@@ -86,6 +86,10 @@ internal static class CommandLineParser
         var method = CropSettings.Default.Method;
         var excludeEdge = CropSettings.Default.ExcludeEdgeTouchingObjects;
         var margin = CropSettings.Default.Margin;
+        var edgeExclusionTolerance = CropSettings.Default.EdgeExclusionTolerance;
+        var detectRepeated = CropSettings.Default.DetectRepeatedObjects;
+        var repeatedThreshold = CropSettings.Default.RepeatedObjectOccurrenceThreshold;
+        var repeatedMinimumPages = CropSettings.Default.RepeatedObjectMinimumPageCount;
 
         int? compressionLevel = null;
         var enableFullCompression = false;
@@ -151,6 +155,41 @@ internal static class CommandLineParser
 
                     break;
 
+                case "--detect-repeated":
+                    detectRepeated = true;
+                    break;
+
+                case "--no-detect-repeated":
+                    detectRepeated = false;
+                    break;
+
+                case "--repeated-threshold":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--repeated-threshold requires a percentage value between 0 and 100");
+                    }
+
+                    if (!double.TryParse(args[++i], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out repeatedThreshold) ||
+                        repeatedThreshold <= 0 || repeatedThreshold > 100)
+                    {
+                        return CommandLineParseResult.Failure("repeated threshold must be a number greater than 0 and less than or equal to 100");
+                    }
+
+                    break;
+
+                case "--repeated-min-pages":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--repeated-min-pages requires a numeric value");
+                    }
+
+                    if (!int.TryParse(args[++i], NumberStyles.Integer, CultureInfo.InvariantCulture, out repeatedMinimumPages) || repeatedMinimumPages < 2)
+                    {
+                        return CommandLineParseResult.Failure("repeated minimum pages must be an integer greater than or equal to 2");
+                    }
+
+                    break;
+
                 case "--preset":
                     if (i + 1 >= args.Length)
                     {
@@ -166,6 +205,10 @@ internal static class CommandLineParser
                     method = presetProfile.CropSettings.Method;
                     excludeEdge = presetProfile.CropSettings.ExcludeEdgeTouchingObjects;
                     margin = presetProfile.CropSettings.Margin;
+                    edgeExclusionTolerance = presetProfile.CropSettings.EdgeExclusionTolerance;
+                    detectRepeated = presetProfile.CropSettings.DetectRepeatedObjects;
+                    repeatedThreshold = presetProfile.CropSettings.RepeatedObjectOccurrenceThreshold;
+                    repeatedMinimumPages = presetProfile.CropSettings.RepeatedObjectMinimumPageCount;
 
                     var presetOptimization = presetProfile.OptimizationSettings;
                     compressionLevel = presetOptimization.CompressionLevel;
@@ -282,7 +325,14 @@ internal static class CommandLineParser
             }
         }
 
-        var cropSettings = new CropSettings(method, excludeEdge, margin);
+        var cropSettings = new CropSettings(
+            method,
+            excludeEdge,
+            margin,
+            edgeExclusionTolerance,
+            detectRepeatedObjects: detectRepeated,
+            repeatedObjectOccurrenceThreshold: repeatedThreshold,
+            repeatedObjectMinimumPageCount: repeatedMinimumPages);
         var optimizationSettings = new PdfOptimizationSettings(
             compressionLevel,
             enableFullCompression,
