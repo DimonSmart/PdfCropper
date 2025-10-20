@@ -6,7 +6,7 @@
 - Write all comments in English.
 - If you need to comment a variable, consider if a better variable name would eliminate the need.
 - **Self-documenting code**: Good code documents itself through clear naming, simple structure, and obvious intent. Comments should explain "why" not "what". If you need to explain "what" the code does, consider refactoring for clarity instead.
-- **XML Documentation**: Only document public APIs. Avoid obvious XML comments that repeat method names or parameter types. Focus on business value, edge cases, or non-obvious behavior.
+- **XML Documentation**: Only document public APIs. For public APIs, standard XML comments documenting parameters and return values are acceptable even if they seem obvious - they serve as official API documentation. For internal/private methods, avoid obvious XML comments that repeat method names or parameter types. Focus on business value, edge cases, or non-obvious behavior.
 - **Property XML Comments**: If a class uses XML comments for its properties, document all properties or remove the comments entirely. Prefer descriptive property names so additional comments are rarely needed.
 - **Examples of obvious comments to avoid**:
   ```csharp
