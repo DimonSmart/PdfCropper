@@ -13,9 +13,10 @@ public sealed class PdfCropper : IPdfCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
+        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        return PdfSmartCropper.CropAsync(inputPdf, cropSettings, optimizationSettings, logger, ct);
+        return PdfSmartCropper.CropAsync(inputPdf, cropSettings, optimizationSettings, logger, progress, ct);
     }
 
     /// <inheritdoc />
@@ -24,8 +25,9 @@ public sealed class PdfCropper : IPdfCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
+        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        return PdfSmartCropper.CropAndMergeAsync(inputs, cropSettings, optimizationSettings, logger, ct);
+        return PdfSmartCropper.CropAndMergeAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct);
     }
 }

@@ -16,6 +16,7 @@ public interface IPdfCropper
     /// <param name="cropSettings">Cropping configuration.</param>
     /// <param name="optimizationSettings">Optimization parameters for the output.</param>
     /// <param name="logger">Optional logger for diagnostic output.</param>
+    /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Bytes of the cropped PDF.</returns>
     Task<byte[]> CropAsync(
@@ -23,6 +24,7 @@ public interface IPdfCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
+        IProgress<string>? progress = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -32,6 +34,7 @@ public interface IPdfCropper
     /// <param name="cropSettings">Cropping configuration applied to each document.</param>
     /// <param name="optimizationSettings">Optimization parameters for the merged output.</param>
     /// <param name="logger">Optional logger for diagnostic output.</param>
+    /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Merged cropped PDF bytes.</returns>
     Task<byte[]> CropAndMergeAsync(
@@ -39,5 +42,6 @@ public interface IPdfCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
+        IProgress<string>? progress = null,
         CancellationToken ct = default);
 }

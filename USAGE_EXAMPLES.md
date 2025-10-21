@@ -75,7 +75,31 @@ byte[] croppedPdf = await PdfSmartCropper.CropAsync(
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
 
-### 4. With Cancellation Token
+### 4. With Progress Reporting (for WebAssembly/UI)
+
+```csharp
+using PdfCropper;
+
+// Progress reporter for real-time updates
+var progress = new Progress<string>(message => 
+{
+    Console.WriteLine(message);
+    // In WebAssembly: StateHasChanged() or UpdateUI()
+});
+
+byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
+byte[] croppedPdf = await PdfSmartCropper.CropAsync(
+    inputPdf, 
+    CropSettings.Default,
+    PdfOptimizationSettings.Default,
+    logger: null,
+    progress,
+    CancellationToken.None
+);
+await File.WriteAllBytesAsync("output.pdf", croppedPdf);
+```
+
+### 5. With Cancellation Token
 
 ```csharp
 using PdfCropper;
@@ -88,7 +112,9 @@ try
     byte[] croppedPdf = await PdfSmartCropper.CropAsync(
         inputPdf, 
         CropSettings.Default,
+        PdfOptimizationSettings.Default,
         logger: null,
+        progress: null,
         cts.Token
     );
     await File.WriteAllBytesAsync("output.pdf", croppedPdf);
