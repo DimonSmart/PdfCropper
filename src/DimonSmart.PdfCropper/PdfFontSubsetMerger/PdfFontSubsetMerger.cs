@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using DimonSmart.PdfCropper;
+using iText.Kernel.Font;
 using iText.Kernel.Pdf;
 
 namespace DimonSmart.PdfCropper.PdfFontSubsetMerger;
@@ -60,6 +61,10 @@ public static class PdfFontSubsetMerger
                     }
 
                     var canonical = cluster[0];
+                    FontSubsetMergerFactory
+                        .TryCreate(canonical.Kind, logger)
+                        ?.Merge(cluster);
+
                     var replacementObject = canonical.ReplacementObject;
 
                     foreach (var duplicate in cluster.Skip(1))
@@ -1552,6 +1557,704 @@ public static class PdfFontSubsetMerger
 
             width = 0f;
             return false;
+        }
+    }
+
+    private interface IFontSubsetMerger
+    {
+        void Merge(IReadOnlyList<FontResourceEntry> fonts);
+    }
+
+    private static class FontSubsetMergerFactory
+    {
+        public static IFontSubsetMerger? TryCreate(FontSubsetKind kind, IPdfCropLogger logger)
+        {
+            return kind switch
+            {
+                FontSubsetKind.TrueType => new TrueTypeSubsetMerger(logger),
+                FontSubsetKind.Type0Identity => new Type0SubsetMerger(logger),
+                _ => null
+            };
+        }
+    }
+
+    private sealed class FontSubsetMergeContext
+    {
+        public FontSubsetMergeContext(IReadOnlyList<FontResourceEntry> fonts)
+        {
+            if (fonts == null || fonts.Count == 0)
+            {
+                throw new ArgumentException("Cluster must contain at least one font resource.", nameof(fonts));
+            }
+
+            Fonts = fonts;
+            Canonical = fonts[0];
+            Glyphs = GlyphMergeMap.Build(fonts);
+        }
+
+        public IReadOnlyList<FontResourceEntry> Fonts { get; }
+
+        public FontResourceEntry Canonical { get; }
+
+        public GlyphMergeMap Glyphs { get; }
+
+        public string CanonicalResourceName => Canonical.ResourceName.GetValue();
+
+        public PdfDocument? Document => Canonical.FontDictionary.GetIndirectReference()?.GetDocument()
+            ?? Canonical.ParentFontsDictionary.GetIndirectReference()?.GetDocument();
+    }
+
+    private sealed class TrueTypeSubsetMerger : IFontSubsetMerger
+    {
+        private readonly IPdfCropLogger logger;
+
+        public TrueTypeSubsetMerger(IPdfCropLogger logger)
+        {
+            this.logger = logger;
+        }
+
+        public void Merge(IReadOnlyList<FontResourceEntry> fonts)
+        {
+            if (fonts.Count == 0)
+            {
+                return;
+            }
+
+            var context = new FontSubsetMergeContext(fonts);
+            SubsetFontDictionaryCleaner.CleanTrueType(context.Canonical.FontDictionary);
+
+            var prepareMessage = $"Prepared TrueType subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
+            new FontMergeLogEvent(2030, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+
+            MergeWidths(context);
+            MergeToUnicode(context);
+            MergeFontFile(context);
+        }
+
+        private void MergeWidths(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var glyphs = context.Glyphs;
+            var resourceName = context.CanonicalResourceName;
+
+            var ordered = glyphs.Entries
+                .Where(pair => pair.Value.TryGetPreferredWidth(resourceName, out _))
+                .OrderBy(pair => pair.Key)
+                .ToList();
+
+            if (ordered.Count == 0)
+            {
+                canonical.FontDictionary.Remove(PdfName.FirstChar);
+                canonical.FontDictionary.Remove(PdfName.LastChar);
+                canonical.FontDictionary.Remove(PdfName.Widths);
+
+                var emptyMessage = $"No glyph widths available for \"{canonical.CanonicalName}\".";
+                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                return;
+            }
+
+            var firstChar = ordered.First().Key;
+            var lastChar = ordered.Last().Key;
+            var widthsArray = new PdfArray();
+
+            for (var code = firstChar; code <= lastChar; code++)
+            {
+                if (!glyphs.Entries.TryGetValue(code, out var entry)
+                    || !entry.TryGetPreferredWidth(resourceName, out var width))
+                {
+                    widthsArray.Add(new PdfNumber(0));
+                    continue;
+                }
+
+                widthsArray.Add(new PdfNumber(width));
+                if (entry.HasWidthConflict)
+                {
+                    var conflict = entry.BuildWidthConflictDescription();
+                    var warning = $"Width conflict for glyph code {code} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
+                    new FontMergeLogEvent(2031, FontMergeLogLevel.Warning, warning).Log(logger);
+                }
+            }
+
+            var fontDictionary = canonical.FontDictionary;
+            fontDictionary.Put(PdfName.FirstChar, new PdfNumber(firstChar));
+            fontDictionary.Put(PdfName.LastChar, new PdfNumber(lastChar));
+            fontDictionary.Put(PdfName.Widths, widthsArray);
+
+            var mergeMessage = $"Merged {ordered.Count} glyph widths for \"{canonical.CanonicalName}\".";
+            new FontMergeLogEvent(2031, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+        }
+
+        private void MergeToUnicode(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var glyphs = context.Glyphs;
+            var resourceName = context.CanonicalResourceName;
+            var unicodeMap = new Dictionary<int, string>();
+
+            foreach (var pair in glyphs.Entries)
+            {
+                if (!pair.Value.TryGetPreferredUnicode(resourceName, out var unicode))
+                {
+                    continue;
+                }
+
+                unicodeMap[pair.Key] = unicode!;
+                if (pair.Value.HasUnicodeConflict)
+                {
+                    var conflict = pair.Value.BuildUnicodeConflictDescription();
+                    var warning = $"Unicode conflict for glyph code {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
+                    new FontMergeLogEvent(2032, FontMergeLogLevel.Warning, warning).Log(logger);
+                }
+            }
+
+            if (unicodeMap.Count == 0)
+            {
+                canonical.FontDictionary.Remove(PdfName.ToUnicode);
+                var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
+                new FontMergeLogEvent(2032, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                return;
+            }
+
+            var stream = ToUnicodeCMapWriter.Create(unicodeMap, false, context.Document);
+            canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
+
+            var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
+            new FontMergeLogEvent(2032, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+        }
+
+        private void MergeFontFile(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var (sourceStream, sourceName) = FontDescriptorUtilities.GetPreferredFontFile2(context.Fonts);
+            var descriptor = FontDescriptorUtilities.GetDescriptor(canonical);
+            if (descriptor == null)
+            {
+                var message = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
+                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, message).Log(logger);
+                return;
+            }
+
+            descriptor.Remove(PdfName.FontFile);
+            descriptor.Remove(PdfName.FontFile3);
+
+            if (sourceStream != null)
+            {
+                var sharedStream = FontDescriptorUtilities.CloneFontFile(sourceStream, context.Document);
+                descriptor.Put(PdfName.FontFile2, sharedStream);
+            }
+            else
+            {
+                descriptor.Remove(PdfName.FontFile2);
+            }
+
+            var newName = FontUtil.AddRandomSubsetPrefixForFontName(canonical.CanonicalName);
+            canonical.FontDictionary.Put(PdfName.BaseFont, new PdfName(newName));
+            descriptor.Put(PdfName.FontName, new PdfName(newName));
+
+            var resultMessage = sourceStream != null
+                ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
+                : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
+            new FontMergeLogEvent(2033, FontMergeLogLevel.Info, resultMessage).Log(logger);
+        }
+    }
+
+    private sealed class Type0SubsetMerger : IFontSubsetMerger
+    {
+        private readonly IPdfCropLogger logger;
+
+        public Type0SubsetMerger(IPdfCropLogger logger)
+        {
+            this.logger = logger;
+        }
+
+        public void Merge(IReadOnlyList<FontResourceEntry> fonts)
+        {
+            if (fonts.Count == 0)
+            {
+                return;
+            }
+
+            var context = new FontSubsetMergeContext(fonts);
+            SubsetFontDictionaryCleaner.CleanType0(context.Canonical.FontDictionary);
+
+            var prepareMessage = $"Prepared Type0 subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
+            new FontMergeLogEvent(2030, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+
+            MergeWidths(context);
+            MergeToUnicode(context);
+            MergeFontFile(context);
+        }
+
+        private void MergeWidths(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var resourceName = context.CanonicalResourceName;
+            var glyphs = context.Glyphs;
+            var cidFont = FontDescriptorUtilities.GetCidFontDictionary(canonical.FontDictionary);
+
+            if (cidFont == null)
+            {
+                var message = $"Skipped width merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
+                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, message).Log(logger);
+                return;
+            }
+
+            var ordered = glyphs.Entries
+                .Where(pair => pair.Value.TryGetPreferredWidth(resourceName, out _))
+                .OrderBy(pair => pair.Key)
+                .ToList();
+
+            if (ordered.Count == 0)
+            {
+                cidFont.Remove(PdfName.W);
+                var emptyMessage = $"No CID widths available for \"{canonical.CanonicalName}\".";
+                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                return;
+            }
+
+            var widthsArray = new PdfArray();
+            var currentStart = -1;
+            List<float> currentWidths = new();
+            var previousCode = -2;
+
+            foreach (var pair in ordered)
+            {
+                if (!pair.Value.TryGetPreferredWidth(resourceName, out var width))
+                {
+                    continue;
+                }
+
+                if (currentStart < 0)
+                {
+                    currentStart = pair.Key;
+                    previousCode = pair.Key;
+                    currentWidths.Add(width);
+                }
+                else if (pair.Key == previousCode + 1)
+                {
+                    previousCode = pair.Key;
+                    currentWidths.Add(width);
+                }
+                else
+                {
+                    AppendWidthRange(widthsArray, currentStart, currentWidths);
+                    currentStart = pair.Key;
+                    previousCode = pair.Key;
+                    currentWidths = new List<float> { width };
+                }
+
+                if (pair.Value.HasWidthConflict)
+                {
+                    var conflict = pair.Value.BuildWidthConflictDescription();
+                    var warning = $"Width conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
+                    new FontMergeLogEvent(2031, FontMergeLogLevel.Warning, warning).Log(logger);
+                }
+            }
+
+            AppendWidthRange(widthsArray, currentStart, currentWidths);
+            cidFont.Put(PdfName.W, widthsArray);
+
+            var mergeMessage = $"Merged {ordered.Count} CID widths for \"{canonical.CanonicalName}\".";
+            new FontMergeLogEvent(2031, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+        }
+
+        private static void AppendWidthRange(PdfArray target, int startCode, List<float> widths)
+        {
+            if (startCode < 0 || widths.Count == 0)
+            {
+                return;
+            }
+
+            target.Add(new PdfNumber(startCode));
+            var array = new PdfArray();
+            foreach (var width in widths)
+            {
+                array.Add(new PdfNumber(width));
+            }
+
+            target.Add(array);
+        }
+
+        private void MergeToUnicode(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var glyphs = context.Glyphs;
+            var resourceName = context.CanonicalResourceName;
+            var unicodeMap = new Dictionary<int, string>();
+
+            foreach (var pair in glyphs.Entries)
+            {
+                if (!pair.Value.TryGetPreferredUnicode(resourceName, out var unicode))
+                {
+                    continue;
+                }
+
+                unicodeMap[pair.Key] = unicode!;
+                if (pair.Value.HasUnicodeConflict)
+                {
+                    var conflict = pair.Value.BuildUnicodeConflictDescription();
+                    var warning = $"Unicode conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
+                    new FontMergeLogEvent(2032, FontMergeLogLevel.Warning, warning).Log(logger);
+                }
+            }
+
+            if (unicodeMap.Count == 0)
+            {
+                canonical.FontDictionary.Remove(PdfName.ToUnicode);
+                var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
+                new FontMergeLogEvent(2032, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                return;
+            }
+
+            var stream = ToUnicodeCMapWriter.Create(unicodeMap, true, context.Document);
+            canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
+
+            var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
+            new FontMergeLogEvent(2032, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+        }
+
+        private void MergeFontFile(FontSubsetMergeContext context)
+        {
+            var canonical = context.Canonical;
+            var cidFont = FontDescriptorUtilities.GetCidFontDictionary(canonical.FontDictionary);
+            if (cidFont == null)
+            {
+                var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
+                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                return;
+            }
+
+            var descriptor = cidFont.GetAsDictionary(PdfName.FontDescriptor);
+            if (descriptor == null)
+            {
+                var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
+                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                return;
+            }
+
+            descriptor.Remove(PdfName.FontFile);
+            descriptor.Remove(PdfName.FontFile3);
+
+            var (sourceStream, sourceName) = FontDescriptorUtilities.GetPreferredFontFile2(context.Fonts);
+            if (sourceStream != null)
+            {
+                var sharedStream = FontDescriptorUtilities.CloneFontFile(sourceStream, context.Document);
+                descriptor.Put(PdfName.FontFile2, sharedStream);
+            }
+            else
+            {
+                descriptor.Remove(PdfName.FontFile2);
+            }
+
+            var newName = FontUtil.AddRandomSubsetPrefixForFontName(canonical.CanonicalName);
+            canonical.FontDictionary.Put(PdfName.BaseFont, new PdfName(newName));
+            cidFont.Put(PdfName.BaseFont, new PdfName(newName));
+            descriptor.Put(PdfName.FontName, new PdfName(newName));
+
+            var resultMessage = sourceStream != null
+                ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
+                : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
+            new FontMergeLogEvent(2033, FontMergeLogLevel.Info, resultMessage).Log(logger);
+        }
+    }
+
+    private static class SubsetFontDictionaryCleaner
+    {
+        public static void CleanTrueType(PdfDictionary fontDictionary)
+        {
+            fontDictionary.Remove(PdfName.FirstChar);
+            fontDictionary.Remove(PdfName.LastChar);
+            fontDictionary.Remove(PdfName.Widths);
+            fontDictionary.Remove(PdfName.ToUnicode);
+
+            var descriptor = fontDictionary.GetAsDictionary(PdfName.FontDescriptor);
+            if (descriptor == null)
+            {
+                return;
+            }
+
+            descriptor.Remove(PdfName.FontFile);
+            descriptor.Remove(PdfName.FontFile2);
+            descriptor.Remove(PdfName.FontFile3);
+        }
+
+        public static void CleanType0(PdfDictionary fontDictionary)
+        {
+            fontDictionary.Remove(PdfName.ToUnicode);
+
+            var cidFont = FontDescriptorUtilities.GetCidFontDictionary(fontDictionary);
+            if (cidFont == null)
+            {
+                return;
+            }
+
+            cidFont.Remove(PdfName.W);
+
+            var descriptor = cidFont.GetAsDictionary(PdfName.FontDescriptor);
+            if (descriptor == null)
+            {
+                return;
+            }
+
+            descriptor.Remove(PdfName.FontFile);
+            descriptor.Remove(PdfName.FontFile2);
+            descriptor.Remove(PdfName.FontFile3);
+        }
+    }
+
+    private static class FontDescriptorUtilities
+    {
+        public static PdfDictionary? GetDescriptor(FontResourceEntry font)
+        {
+            return font.Kind switch
+            {
+                FontSubsetKind.TrueType => font.FontDictionary.GetAsDictionary(PdfName.FontDescriptor),
+                FontSubsetKind.Type0Identity => GetCidFontDictionary(font.FontDictionary)?.GetAsDictionary(PdfName.FontDescriptor),
+                _ => null
+            };
+        }
+
+        public static PdfDictionary? GetCidFontDictionary(PdfDictionary fontDictionary)
+        {
+            var descendants = fontDictionary.GetAsArray(PdfName.DescendantFonts);
+            return descendants?.GetAsDictionary(0);
+        }
+
+        public static (PdfStream? Stream, string SourceName) GetPreferredFontFile2(IReadOnlyList<FontResourceEntry> fonts)
+        {
+            foreach (var font in fonts)
+            {
+                var descriptor = GetDescriptor(font);
+                var stream = descriptor?.GetAsStream(PdfName.FontFile2);
+                if (stream != null)
+                {
+                    return (stream, font.ResourceName.GetValue());
+                }
+            }
+
+            return (null, string.Empty);
+        }
+
+        public static PdfStream CloneFontFile(PdfStream source, PdfDocument? document)
+        {
+            var bytes = source.GetBytes(true);
+            var stream = new PdfStream(bytes);
+            if (document != null)
+            {
+                stream.MakeIndirect(document);
+            }
+
+            return stream;
+        }
+    }
+
+    private sealed class GlyphMergeMap
+    {
+        private GlyphMergeMap(Dictionary<int, GlyphMergeEntry> entries)
+        {
+            Entries = entries;
+        }
+
+        public IReadOnlyDictionary<int, GlyphMergeEntry> Entries { get; }
+
+        public static GlyphMergeMap Build(IReadOnlyList<FontResourceEntry> fonts)
+        {
+            var map = new Dictionary<int, GlyphMergeEntry>();
+            foreach (var font in fonts)
+            {
+                var resourceName = font.ResourceName.GetValue();
+                foreach (var code in font.EncounteredCodes)
+                {
+                    if (!map.TryGetValue(code, out var entry))
+                    {
+                        entry = new GlyphMergeEntry();
+                        map[code] = entry;
+                    }
+
+                    if (font.TryGetWidth(code, out var width))
+                    {
+                        entry.AddWidth(resourceName, width);
+                    }
+
+                    if (font.TryGetUnicode(code, out var unicode) && unicode != null)
+                    {
+                        entry.AddUnicode(resourceName, unicode);
+                    }
+                }
+            }
+
+            return new GlyphMergeMap(map);
+        }
+    }
+
+    private sealed class GlyphMergeEntry
+    {
+        private readonly List<(string FontResource, float Width)> widthEntries = new();
+        private readonly Dictionary<float, HashSet<string>> widthsByValue = new();
+        private readonly List<(string FontResource, string Unicode)> unicodeEntries = new();
+        private readonly Dictionary<string, HashSet<string>> unicodeByValue = new();
+
+        public bool TryGetPreferredWidth(string canonicalResource, out float width)
+        {
+            foreach (var entry in widthEntries)
+            {
+                if (entry.FontResource.Equals(canonicalResource, StringComparison.Ordinal))
+                {
+                    width = entry.Width;
+                    return true;
+                }
+            }
+
+            if (widthEntries.Count > 0)
+            {
+                width = widthEntries[0].Width;
+                return true;
+            }
+
+            width = 0f;
+            return false;
+        }
+
+        public bool TryGetPreferredUnicode(string canonicalResource, out string? unicode)
+        {
+            foreach (var entry in unicodeEntries)
+            {
+                if (entry.FontResource.Equals(canonicalResource, StringComparison.Ordinal))
+                {
+                    unicode = entry.Unicode;
+                    return true;
+                }
+            }
+
+            if (unicodeEntries.Count > 0)
+            {
+                unicode = unicodeEntries[0].Unicode;
+                return true;
+            }
+
+            unicode = null;
+            return false;
+        }
+
+        public bool HasWidthConflict => widthsByValue.Count > 1;
+
+        public bool HasUnicodeConflict => unicodeByValue.Count > 1;
+
+        public string BuildWidthConflictDescription()
+        {
+            return string.Join("; ", widthsByValue.Select(pair => $"{pair.Key.ToString(CultureInfo.InvariantCulture)}: {string.Join(",", pair.Value)}"));
+        }
+
+        public string BuildUnicodeConflictDescription()
+        {
+            return string.Join("; ", unicodeByValue.Select(pair => $"{pair.Key}: {string.Join(",", pair.Value)}"));
+        }
+
+        public void AddWidth(string fontResource, float width)
+        {
+            widthEntries.Add((fontResource, width));
+            if (!widthsByValue.TryGetValue(width, out var fonts))
+            {
+                fonts = new HashSet<string>(StringComparer.Ordinal);
+                widthsByValue[width] = fonts;
+            }
+
+            fonts.Add(fontResource);
+        }
+
+        public void AddUnicode(string fontResource, string unicode)
+        {
+            unicodeEntries.Add((fontResource, unicode));
+            if (!unicodeByValue.TryGetValue(unicode, out var fonts))
+            {
+                fonts = new HashSet<string>(StringComparer.Ordinal);
+                unicodeByValue[unicode] = fonts;
+            }
+
+            fonts.Add(fontResource);
+        }
+    }
+
+    private static class ToUnicodeCMapWriter
+    {
+        public static PdfStream Create(Dictionary<int, string> map, bool isCidFont, PdfDocument? document)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("/CIDInit /ProcSet findresource begin");
+            builder.AppendLine("12 dict begin");
+            builder.AppendLine("begincmap");
+            builder.AppendLine("/CMapName /Adobe-Identity-UCS def");
+            builder.AppendLine("/CMapType 2 def");
+            builder.AppendLine("1 begincodespacerange");
+            builder.AppendLine(isCidFont ? "<0000> <FFFF>" : "<00> <FF>");
+            builder.AppendLine("endcodespacerange");
+
+            var ordered = map.OrderBy(pair => pair.Key).ToList();
+            var index = 0;
+            while (index < ordered.Count)
+            {
+                var chunkSize = Math.Min(100, ordered.Count - index);
+                builder.Append(chunkSize.ToString(CultureInfo.InvariantCulture));
+                builder.AppendLine(" beginbfchar");
+
+                for (var i = 0; i < chunkSize; i++)
+                {
+                    var entry = ordered[index + i];
+                    var source = EncodeSource(entry.Key, isCidFont);
+                    var destination = EncodeUnicode(entry.Value);
+                    builder.Append('<');
+                    builder.Append(source);
+                    builder.Append("> <");
+                    builder.Append(destination);
+                    builder.AppendLine(">");
+                }
+
+                builder.AppendLine("endbfchar");
+                index += chunkSize;
+            }
+
+            builder.AppendLine("endcmap");
+            builder.AppendLine("CMapName currentdict /CMap defineresource pop");
+            builder.AppendLine("end");
+            builder.AppendLine("end");
+
+            var bytes = Encoding.ASCII.GetBytes(builder.ToString());
+            var stream = new PdfStream(bytes);
+            if (document != null)
+            {
+                stream.MakeIndirect(document);
+            }
+
+            return stream;
+        }
+
+        private static string EncodeSource(int code, bool isCidFont)
+        {
+            var hex = code.ToString("X");
+            if (hex.Length % 2 == 1)
+            {
+                hex = "0" + hex;
+            }
+
+            var minimumLength = isCidFont ? 4 : 2;
+            while (hex.Length < minimumLength)
+            {
+                hex = "0" + hex;
+            }
+
+            return hex;
+        }
+
+        private static string EncodeUnicode(string value)
+        {
+            var bytes = Encoding.BigEndianUnicode.GetBytes(value);
+            var builder = new StringBuilder(bytes.Length * 2);
+            foreach (var b in bytes)
+            {
+                builder.Append(b.ToString("X2"));
+            }
+
+            return builder.ToString();
         }
     }
 
