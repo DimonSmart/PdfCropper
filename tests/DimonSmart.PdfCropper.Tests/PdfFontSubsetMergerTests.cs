@@ -34,8 +34,8 @@ public class PdfFontSubsetMergerTests
 
         var merged = Merge(source, FontSubsetMergeOptions.CreateDefault(), logger);
 
-        Assert.Contains(logger.Events, e => e.Id == 2005 && e.Message.Contains("subset fonts", StringComparison.Ordinal));
-        Assert.Contains(logger.Events, e => e.Id == 2030 && e.Message.Contains("Type0", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontsMerged && e.Message.Contains("subset fonts", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetMergePrepared && e.Message.Contains("Type0", StringComparison.Ordinal));
 
         using var pdf = new PdfDocument(new PdfReader(new MemoryStream(merged)));
         var page = pdf.GetPage(1);
@@ -66,8 +66,8 @@ public class PdfFontSubsetMergerTests
 
         var merged = Merge(source, FontSubsetMergeOptions.CreateDefault(), logger);
 
-        Assert.Contains(logger.Events, e => e.Id == 2005 && e.Message.Contains("subset fonts", StringComparison.Ordinal));
-        Assert.Contains(logger.Events, e => e.Id == 2030 && e.Message.Contains("TrueType", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontsMerged && e.Message.Contains("subset fonts", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetMergePrepared && e.Message.Contains("TrueType", StringComparison.Ordinal));
 
         using var pdf = new PdfDocument(new PdfReader(new MemoryStream(merged)));
         var page = pdf.GetPage(1);
@@ -89,7 +89,7 @@ public class PdfFontSubsetMergerTests
 
         var merged = Merge(conflicting, FontSubsetMergeOptions.CreateDefault(), logger);
 
-        Assert.Contains(logger.Events, e => e.Id == 2020 && e.Level == TestPdfLogger.InfoLevel);
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.FontClustersSplit && e.Level == TestPdfLogger.InfoLevel);
 
         using var pdf = new PdfDocument(new PdfReader(new MemoryStream(merged)));
         var page = pdf.GetPage(1);
@@ -117,7 +117,7 @@ public class PdfFontSubsetMergerTests
 
         _ = Merge(withCidFont, options, logger);
 
-        Assert.Contains(logger.Events, e => e.Id == 2001 && e.Level == TestPdfLogger.WarningLevel);
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype && e.Level == TestPdfLogger.WarningLevel);
     }
 
     private static byte[] CreateType0Document()
@@ -500,25 +500,25 @@ public sealed class TestPdfLogger : IPdfCropLogger
         events.Add(new LogEvent(ParseId(message), level, message));
     }
 
-    private static int ParseId(string message)
+    private static FontMergeLogEventId? ParseId(string message)
     {
         var prefix = "[FontSubsetMerge][";
         var start = message.IndexOf(prefix, StringComparison.Ordinal);
         if (start < 0)
         {
-            return -1;
+            return null;
         }
 
         start += prefix.Length;
         var end = message.IndexOf(']', start);
         if (end < 0)
         {
-            return -1;
+            return null;
         }
 
         var span = message[start..end];
-        return int.TryParse(span, out var id) ? id : -1;
+        return Enum.TryParse<FontMergeLogEventId>(span, out var id) ? id : null;
     }
 
-    public readonly record struct LogEvent(int Id, string Level, string Message);
+    public readonly record struct LogEvent(FontMergeLogEventId? Id, string Level, string Message);
 }
