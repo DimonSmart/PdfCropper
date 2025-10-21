@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -45,6 +46,7 @@ public static class PdfFontSubsetMerger
                 return;
             }
 
+            var replacements = new List<FontResourceReplacement>();
             var groups = fonts
                 .GroupBy(entry => entry.MergeKey, StringComparer.Ordinal)
                 .Where(group => group.Count() > 1)
@@ -70,11 +72,916 @@ public static class PdfFontSubsetMerger
                     foreach (var duplicate in cluster.Skip(1))
                     {
                         duplicate.ParentFontsDictionary.Put(duplicate.ResourceName, replacementObject);
+                        replacements.Add(new FontResourceReplacement(
+                            duplicate.ParentFontsDictionary,
+                            duplicate.ResourceName,
+                            canonical.ResourceName,
+                            replacementObject,
+                            canonical.CanonicalName));
                     }
 
                     var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\".";
                     new FontMergeLogEvent(2005, FontMergeLogLevel.Info, mergeMessage).Log(logger);
                 }
+            }
+
+            ApplyFontResourceReplacements(pdfDocument, replacements);
+        }
+
+        private void ApplyFontResourceReplacements(
+            PdfDocument pdfDocument,
+            List<FontResourceReplacement> replacements)
+        {
+            if (replacements.Count == 0)
+            {
+                return;
+            }
+
+            var dictionaryComparer = new PdfDictionaryReferenceComparer();
+            var updates = new Dictionary<PdfDictionary, FontDictionaryUpdateInfo>(dictionaryComparer);
+
+            foreach (var replacement in replacements)
+            {
+                if (!updates.TryGetValue(replacement.FontsDictionary, out var info))
+                {
+                    info = new FontDictionaryUpdateInfo(replacement.FontsDictionary);
+                    updates[replacement.FontsDictionary] = info;
+                }
+
+                info.Add(replacement);
+            }
+
+            var renameLookup = new Dictionary<PdfDictionary, Dictionary<string, string>>(dictionaryComparer);
+
+            foreach (var info in updates.Values)
+            {
+                info.Apply(logger);
+                if (info.RenameMap.Count > 0)
+                {
+                    renameLookup[info.FontsDictionary] = info.RenameMap;
+                }
+            }
+
+            if (renameLookup.Count == 0)
+            {
+                return;
+            }
+
+            var usedFontNames = new Dictionary<PdfDictionary, HashSet<string>>(dictionaryComparer);
+            var visitedStreams = new HashSet<long>();
+
+            var pageCount = pdfDocument.GetNumberOfPages();
+            for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+            {
+                var page = pdfDocument.GetPage(pageIndex);
+                var resources = page.GetResources()?.GetPdfObject() as PdfDictionary
+                    ?? page.GetPdfObject()?.GetAsDictionary(PdfName.Resources);
+
+                ProcessPageContent(page, resources, pageIndex, renameLookup, usedFontNames, visitedStreams);
+
+                if (options.IncludeAnnotations)
+                {
+                    ProcessAnnotations(page, pageIndex, renameLookup, usedFontNames, visitedStreams);
+                }
+            }
+
+            RemoveUnusedFonts(renameLookup, usedFontNames);
+        }
+
+        private void ProcessPageContent(
+            PdfPage page,
+            PdfDictionary? resources,
+            int pageNumber,
+            Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames,
+            HashSet<long> visitedStreams)
+        {
+            if (resources != null)
+            {
+                var fontsDictionary = resources.GetAsDictionary(PdfName.Font);
+                if (fontsDictionary != null && renameLookup.TryGetValue(fontsDictionary, out var renameMap))
+                {
+                    var usageSet = GetUsageSet(fontsDictionary, usedFontNames);
+                    var streamCount = page.GetContentStreamCount();
+                    for (var index = 0; index < streamCount; index++)
+                    {
+                        var stream = page.GetContentStream(index);
+                        if (stream == null)
+                        {
+                            continue;
+                        }
+
+                        var reference = stream.GetIndirectReference();
+                        if (reference != null)
+                        {
+                            var key = ReferenceKey(reference);
+                            if (!visitedStreams.Add(key))
+                            {
+                                continue;
+                            }
+                        }
+
+                        ProcessStream(stream, renameMap, usageSet, $"page {pageNumber}");
+                    }
+                }
+
+                if (options.IncludeFormXObjects)
+                {
+                    ProcessFormXObjects(resources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                }
+            }
+        }
+
+        private void ProcessFormXObjects(
+            PdfDictionary resources,
+            int pageNumber,
+            Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames,
+            HashSet<long> visitedStreams)
+        {
+            var xObjects = resources.GetAsDictionary(PdfName.XObject);
+            if (xObjects == null)
+            {
+                return;
+            }
+
+            foreach (var name in xObjects.KeySet())
+            {
+                var stream = xObjects.GetAsStream(name);
+                if (stream == null)
+                {
+                    continue;
+                }
+
+                var reference = stream.GetIndirectReference();
+                if (reference != null)
+                {
+                    var key = ReferenceKey(reference);
+                    if (!visitedStreams.Add(key))
+                    {
+                        continue;
+                    }
+                }
+
+                var nestedResources = stream.GetAsDictionary(PdfName.Resources);
+                if (nestedResources == null)
+                {
+                    continue;
+                }
+
+                var fontsDictionary = nestedResources.GetAsDictionary(PdfName.Font);
+                if (fontsDictionary != null && renameLookup.TryGetValue(fontsDictionary, out var renameMap))
+                {
+                    var context = $"form XObject {name.GetValue()} on page {pageNumber}";
+                    var usageSet = GetUsageSet(fontsDictionary, usedFontNames);
+                    ProcessStream(stream, renameMap, usageSet, context);
+                }
+
+                if (options.IncludeFormXObjects)
+                {
+                    ProcessFormXObjects(nestedResources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                }
+            }
+        }
+
+        private void ProcessAnnotations(
+            PdfPage page,
+            int pageNumber,
+            Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames,
+            HashSet<long> visitedStreams)
+        {
+            var pageDictionary = page.GetPdfObject();
+            var annotations = pageDictionary?.GetAsArray(PdfName.Annots);
+            if (annotations == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < annotations.Size(); i++)
+            {
+                var annotationDictionary = annotations.GetAsDictionary(i);
+                if (annotationDictionary == null)
+                {
+                    continue;
+                }
+
+                var appearanceDictionary = annotationDictionary.GetAsDictionary(PdfName.AP);
+                if (appearanceDictionary == null)
+                {
+                    continue;
+                }
+
+                foreach (var name in appearanceDictionary.KeySet())
+                {
+                    var appearanceObject = appearanceDictionary.Get(name);
+                    ProcessAppearanceObject(
+                        appearanceObject,
+                        pageNumber,
+                        $"annotation appearance {name.GetValue()} on page {pageNumber}",
+                        renameLookup,
+                        usedFontNames,
+                        visitedStreams);
+                }
+            }
+        }
+
+        private void ProcessAppearanceObject(
+            PdfObject? appearanceObject,
+            int pageNumber,
+            string context,
+            Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames,
+            HashSet<long> visitedStreams)
+        {
+            if (appearanceObject == null)
+            {
+                return;
+            }
+
+            switch (appearanceObject)
+            {
+                case PdfStream stream:
+                    var reference = stream.GetIndirectReference();
+                    if (reference != null)
+                    {
+                        var key = ReferenceKey(reference);
+                        if (!visitedStreams.Add(key))
+                        {
+                            return;
+                        }
+                    }
+
+                    var resources = stream.GetAsDictionary(PdfName.Resources);
+                    if (resources != null)
+                    {
+                        var fontsDictionary = resources.GetAsDictionary(PdfName.Font);
+                        if (fontsDictionary != null && renameLookup.TryGetValue(fontsDictionary, out var renameMap))
+                        {
+                            var usageSet = GetUsageSet(fontsDictionary, usedFontNames);
+                            ProcessStream(stream, renameMap, usageSet, context);
+                        }
+
+                        if (options.IncludeFormXObjects)
+                        {
+                            ProcessFormXObjects(resources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                        }
+                    }
+
+                    break;
+                case PdfDictionary dictionary:
+                    foreach (var name in dictionary.KeySet())
+                    {
+                        ProcessAppearanceObject(
+                            dictionary.Get(name),
+                            pageNumber,
+                            context,
+                            renameLookup,
+                            usedFontNames,
+                            visitedStreams);
+                    }
+
+                    break;
+                case PdfArray array:
+                    for (var i = 0; i < array.Size(); i++)
+                    {
+                        ProcessAppearanceObject(
+                            array.Get(i),
+                            pageNumber,
+                            context,
+                            renameLookup,
+                            usedFontNames,
+                            visitedStreams);
+                    }
+
+                    break;
+            }
+        }
+
+        private void ProcessStream(
+            PdfStream stream,
+            Dictionary<string, string> renameMap,
+            HashSet<string> usageSet,
+            string context)
+        {
+            if (stream == null)
+            {
+                return;
+            }
+
+            var bytes = stream.GetBytes(true);
+            if (bytes == null || bytes.Length == 0)
+            {
+                return;
+            }
+
+            var replacements = new List<FontOperatorReplacement>();
+            var editor = new ContentStreamFontReferenceEditor(bytes, renameMap);
+            var updatedBytes = editor.Execute(usageSet, replacements);
+
+            if (updatedBytes != null)
+            {
+                stream.SetData(updatedBytes);
+            }
+
+            LogFontOperatorReplacements(context, replacements);
+        }
+
+        private static HashSet<string> GetUsageSet(
+            PdfDictionary fontsDictionary,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames)
+        {
+            if (!usedFontNames.TryGetValue(fontsDictionary, out var usageSet))
+            {
+                usageSet = new HashSet<string>(StringComparer.Ordinal);
+                usedFontNames[fontsDictionary] = usageSet;
+            }
+
+            return usageSet;
+        }
+
+        private void LogFontOperatorReplacements(string context, List<FontOperatorReplacement> replacements)
+        {
+            if (replacements.Count == 0)
+            {
+                return;
+            }
+
+            var groups = replacements
+                .GroupBy(replacement => replacement)
+                .Select(group => new { group.Key.OldName, group.Key.NewName, Count = group.Count() });
+
+            foreach (var group in groups)
+            {
+                var message = $"Updated Tf operator from \"/{group.OldName}\" to \"/{group.NewName}\" in {context} ({group.Count} occurrence(s)).";
+                new FontMergeLogEvent(2050, FontMergeLogLevel.Info, message).Log(logger);
+            }
+        }
+
+        private void RemoveUnusedFonts(
+            Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
+            Dictionary<PdfDictionary, HashSet<string>> usedFontNames)
+        {
+            foreach (var pair in renameLookup)
+            {
+                var fontsDictionary = pair.Key;
+                var usageSet = usedFontNames.TryGetValue(fontsDictionary, out var used)
+                    ? used
+                    : new HashSet<string>(StringComparer.Ordinal);
+
+                var names = fontsDictionary.KeySet().ToArray();
+                foreach (var name in names)
+                {
+                    var value = name.GetValue();
+                    if (usageSet.Contains(value))
+                    {
+                        continue;
+                    }
+
+                    fontsDictionary.Remove(name);
+                    var message = $"Removed unused font resource \"/{value}\" from fonts dictionary.";
+                    new FontMergeLogEvent(2060, FontMergeLogLevel.Info, message).Log(logger);
+                }
+            }
+        }
+
+        private readonly record struct FontResourceReplacement(
+            PdfDictionary FontsDictionary,
+            PdfName OldName,
+            PdfName NewName,
+            PdfObject ReplacementObject,
+            string CanonicalName);
+
+        private sealed class FontDictionaryUpdateInfo
+        {
+            private readonly List<FontResourceReplacement> replacements = new();
+
+            public FontDictionaryUpdateInfo(PdfDictionary fontsDictionary)
+            {
+                FontsDictionary = fontsDictionary;
+            }
+
+            public PdfDictionary FontsDictionary { get; }
+
+            public Dictionary<string, string> RenameMap { get; } = new(StringComparer.Ordinal);
+
+            public void Add(FontResourceReplacement replacement)
+            {
+                replacements.Add(replacement);
+            }
+
+            public void Apply(IPdfCropLogger logger)
+            {
+                foreach (var replacement in replacements)
+                {
+                    var oldName = replacement.OldName;
+                    var newName = replacement.NewName;
+
+                    if (!oldName.Equals(newName))
+                    {
+                        FontsDictionary.Remove(oldName);
+                        RenameMap[oldName.GetValue()] = newName.GetValue();
+
+                        var message = $"Replaced font resource key \"/{oldName.GetValue()}\" with \"/{newName.GetValue()}\" for \"{replacement.CanonicalName}\".";
+                        new FontMergeLogEvent(2040, FontMergeLogLevel.Info, message).Log(logger);
+                    }
+
+                    FontsDictionary.Put(newName, replacement.ReplacementObject);
+                }
+            }
+        }
+
+        private sealed class PdfDictionaryReferenceComparer : IEqualityComparer<PdfDictionary>
+        {
+            public bool Equals(PdfDictionary? x, PdfDictionary? y)
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            public int GetHashCode(PdfDictionary obj)
+            {
+                return RuntimeHelpers.GetHashCode(obj);
+            }
+        }
+
+        private sealed record FontOperatorReplacement(string OldName, string NewName);
+
+        private sealed class ContentStreamFontReferenceEditor
+        {
+            private readonly byte[] data;
+            private readonly Dictionary<string, string> replacements;
+            private readonly List<ReplacementSpan> spans = new();
+            private readonly List<Token> operands = new();
+            private int position;
+
+            public ContentStreamFontReferenceEditor(byte[] data, Dictionary<string, string> replacements)
+            {
+                this.data = data ?? Array.Empty<byte>();
+                this.replacements = replacements;
+            }
+
+            public byte[]? Execute(HashSet<string> usageSet, List<FontOperatorReplacement> replacementLog)
+            {
+                if (data.Length == 0)
+                {
+                    return null;
+                }
+
+                position = 0;
+                spans.Clear();
+                operands.Clear();
+
+                while (TryReadToken(out var token))
+                {
+                    if (token.Type == TokenType.Operator)
+                    {
+                        ProcessOperator(token.Value!, usageSet, replacementLog);
+                        operands.Clear();
+                    }
+                    else if (token.Type != TokenType.None)
+                    {
+                        operands.Add(token);
+                    }
+                }
+
+                if (spans.Count == 0)
+                {
+                    return null;
+                }
+
+                using var stream = new MemoryStream(data.Length + spans.Count * 8);
+                var currentIndex = 0;
+                foreach (var span in spans)
+                {
+                    if (span.Start > currentIndex)
+                    {
+                        stream.Write(data, currentIndex, span.Start - currentIndex);
+                    }
+
+                    var replacementBytes = Encoding.ASCII.GetBytes(span.Replacement);
+                    stream.Write(replacementBytes, 0, replacementBytes.Length);
+                    currentIndex = span.Start + span.Length;
+                }
+
+                if (currentIndex < data.Length)
+                {
+                    stream.Write(data, currentIndex, data.Length - currentIndex);
+                }
+
+                return stream.ToArray();
+            }
+
+            private void ProcessOperator(string op, HashSet<string> usageSet, List<FontOperatorReplacement> replacementLog)
+            {
+                if (!string.Equals(op, "Tf", StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (operands.Count == 0)
+                {
+                    return;
+                }
+
+                var operand = operands[0];
+                if (operand.Type != TokenType.Name || operand.Value == null)
+                {
+                    return;
+                }
+
+                usageSet.Add(operand.Value);
+
+                if (!replacements.TryGetValue(operand.Value, out var newName))
+                {
+                    return;
+                }
+
+                if (string.Equals(newName, operand.Value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                usageSet.Add(newName);
+                spans.Add(new ReplacementSpan(operand.Start, operand.Length, "/" + newName));
+                replacementLog.Add(new FontOperatorReplacement(operand.Value, newName));
+            }
+
+            private bool TryReadToken(out Token token)
+            {
+                SkipWhitespaceAndComments();
+                if (position >= data.Length)
+                {
+                    token = Token.None;
+                    return false;
+                }
+
+                var current = (char)data[position];
+                if (current == '<' && position + 1 < data.Length && data[position + 1] == (byte)'<')
+                {
+                    position += 2;
+                    SkipDictionary();
+                    return TryReadToken(out token);
+                }
+
+                token = ReadTokenInternal();
+                return token.Type != TokenType.None;
+            }
+
+            private Token ReadTokenInternal()
+            {
+                if (position >= data.Length)
+                {
+                    return Token.None;
+                }
+
+                var current = (char)data[position];
+                if (current == '/')
+                {
+                    var tokenStart = position;
+                    position++;
+                    var start = position;
+                    while (position < data.Length)
+                    {
+                        var ch = (char)data[position];
+                        if (IsDelimiter(ch) || char.IsWhiteSpace(ch))
+                        {
+                            break;
+                        }
+
+                        position++;
+                    }
+
+                    var raw = Encoding.ASCII.GetString(data, start, position - start);
+                    var decoded = DecodeName(raw);
+                    return new Token(TokenType.Name, decoded, tokenStart, position - tokenStart);
+                }
+
+                if (current == '(')
+                {
+                    var tokenStart = position;
+                    position++;
+                    SkipLiteralString();
+                    return new Token(TokenType.String, null, tokenStart, position - tokenStart);
+                }
+
+                if (current == '<')
+                {
+                    var tokenStart = position;
+                    position++;
+                    SkipHexString();
+                    return new Token(TokenType.String, null, tokenStart, position - tokenStart);
+                }
+
+                if (current == '[')
+                {
+                    var tokenStart = position;
+                    position++;
+                    while (true)
+                    {
+                        SkipWhitespaceAndComments();
+                        if (position >= data.Length)
+                        {
+                            break;
+                        }
+
+                        if ((char)data[position] == ']')
+                        {
+                            position++;
+                            break;
+                        }
+
+                        var nested = ReadTokenInternal();
+                        if (nested.Type == TokenType.None)
+                        {
+                            break;
+                        }
+                    }
+
+                    return new Token(TokenType.Array, null, tokenStart, position - tokenStart);
+                }
+
+                if (IsNumberStart(current))
+                {
+                    var tokenStart = position;
+                    ReadNumber();
+                    return new Token(TokenType.Number, null, tokenStart, position - tokenStart);
+                }
+
+                if (current == ']')
+                {
+                    position++;
+                    return Token.None;
+                }
+
+                var operatorStart = position;
+                var op = ReadOperator();
+                return new Token(TokenType.Operator, op, operatorStart, position - operatorStart);
+            }
+
+            private void SkipWhitespaceAndComments()
+            {
+                while (position < data.Length)
+                {
+                    var current = (char)data[position];
+                    if (current == '%')
+                    {
+                        position++;
+                        while (position < data.Length)
+                        {
+                            var c = (char)data[position];
+                            position++;
+                            if (c == '\n' || c == '\r')
+                            {
+                                break;
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (!IsWhitespace(current))
+                    {
+                        break;
+                    }
+
+                    position++;
+                }
+            }
+
+            private void SkipDictionary()
+            {
+                var depth = 1;
+                while (position < data.Length && depth > 0)
+                {
+                    SkipWhitespaceAndComments();
+                    if (position >= data.Length)
+                    {
+                        break;
+                    }
+
+                    var current = (char)data[position];
+                    if (current == '<' && position + 1 < data.Length && data[position + 1] == (byte)'<')
+                    {
+                        position += 2;
+                        depth++;
+                        continue;
+                    }
+
+                    if (current == '>' && position + 1 < data.Length && data[position + 1] == (byte)'>')
+                    {
+                        position += 2;
+                        depth--;
+                        continue;
+                    }
+
+                    if (current == '(')
+                    {
+                        position++;
+                        SkipLiteralString();
+                        continue;
+                    }
+
+                    if (current == '<')
+                    {
+                        position++;
+                        SkipHexString();
+                        continue;
+                    }
+
+                    if (current == '[')
+                    {
+                        position++;
+                        while (position < data.Length)
+                        {
+                            SkipWhitespaceAndComments();
+                            if (position >= data.Length)
+                            {
+                                break;
+                            }
+
+                            if ((char)data[position] == ']')
+                            {
+                                position++;
+                                break;
+                            }
+
+                            ReadTokenInternal();
+                        }
+
+                        continue;
+                    }
+
+                    if (current == '/')
+                    {
+                        position++;
+                        while (position < data.Length)
+                        {
+                            var ch = (char)data[position];
+                            if (IsDelimiter(ch) || char.IsWhiteSpace(ch))
+                            {
+                                break;
+                            }
+
+                            position++;
+                        }
+
+                        continue;
+                    }
+
+                    position++;
+                }
+            }
+
+            private void SkipLiteralString()
+            {
+                var depth = 1;
+                while (position < data.Length && depth > 0)
+                {
+                    var current = (char)data[position];
+                    position++;
+
+                    if (current == '\\')
+                    {
+                        if (position < data.Length)
+                        {
+                            var next = (char)data[position];
+                            position++;
+
+                            if (next is >= '0' and <= '7')
+                            {
+                                for (var i = 0; i < 2 && position < data.Length; i++)
+                                {
+                                    var peek = (char)data[position];
+                                    if (peek is < '0' or > '7')
+                                    {
+                                        break;
+                                    }
+
+                                    position++;
+                                }
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (current == '(')
+                    {
+                        depth++;
+                        continue;
+                    }
+
+                    if (current == ')')
+                    {
+                        depth--;
+                    }
+                }
+            }
+
+            private void SkipHexString()
+            {
+                while (position < data.Length)
+                {
+                    var current = (char)data[position];
+                    position++;
+                    if (current == '>')
+                    {
+                        break;
+                    }
+                }
+            }
+
+            private void ReadNumber()
+            {
+                position++;
+                while (position < data.Length)
+                {
+                    var ch = (char)data[position];
+                    if (!(char.IsDigit(ch) || ch is '+' or '-' or '.' or 'E' or 'e'))
+                    {
+                        break;
+                    }
+
+                    position++;
+                }
+            }
+
+            private string ReadOperator()
+            {
+                var start = position;
+                position++;
+                while (position < data.Length)
+                {
+                    var current = (char)data[position];
+                    if (IsDelimiter(current) || IsWhitespace(current))
+                    {
+                        break;
+                    }
+
+                    position++;
+                }
+
+                return Encoding.ASCII.GetString(data, start, position - start);
+            }
+
+            private static string DecodeName(string raw)
+            {
+                if (string.IsNullOrEmpty(raw))
+                {
+                    return string.Empty;
+                }
+
+                var builder = new StringBuilder(raw.Length);
+                for (var i = 0; i < raw.Length; i++)
+                {
+                    var ch = raw[i];
+                    if (ch == '#' && i + 2 < raw.Length)
+                    {
+                        var hex = raw.Substring(i + 1, 2);
+                        if (int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
+                        {
+                            builder.Append((char)value);
+                            i += 2;
+                            continue;
+                        }
+                    }
+
+                    builder.Append(ch);
+                }
+
+                return builder.ToString();
+            }
+
+            private static bool IsDelimiter(char ch)
+            {
+                return ch is '(' or ')' or '<' or '>' or '[' or ']' or '{' or '}' or '/' or '%';
+            }
+
+            private static bool IsWhitespace(char ch)
+            {
+                return ch is '\0' or '\t' or '\n' or '\f' or '\r' or ' ';
+            }
+
+            private static bool IsNumberStart(char ch)
+            {
+                return char.IsDigit(ch) || ch is '+' or '-' or '.';
+            }
+
+            private readonly record struct ReplacementSpan(int Start, int Length, string Replacement);
+
+            private readonly record struct Token(TokenType Type, string? Value, int Start, int Length)
+            {
+                public static readonly Token None = new(TokenType.None, null, 0, 0);
+            }
+
+            private enum TokenType
+            {
+                None,
+                Name,
+                Operator,
+                Number,
+                String,
+                Array
             }
         }
     }
