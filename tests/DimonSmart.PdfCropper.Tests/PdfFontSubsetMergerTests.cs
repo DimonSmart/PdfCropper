@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -12,6 +13,7 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Xobject;
+using iText.Kernel.Utils;
 using iText.Kernel.Font;
 using Xunit;
 
@@ -25,6 +27,7 @@ public class PdfFontSubsetMergerTests
     private const string Type0FormText = "Type0 sample";
     private const string TrueTypeLineOne = "TrueType sample";
     private const string TrueTypeLineTwo = "TrueType sample";
+    private static readonly string[] ExpectedSubsetCharacters = { "1", "2", "3", "a", "b", "c" };
 
     [Fact]
     public void MergeDuplicateSubsets_Type0Fonts_MergesResourcesAndFormXObjects()
@@ -118,6 +121,58 @@ public class PdfFontSubsetMergerTests
         _ = Merge(withCidFont, options, logger);
 
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype && e.Level == TestPdfLogger.WarningLevel);
+    }
+
+    [Fact]
+    public void MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects()
+    {
+        var fontPath = GetFontPath();
+        var firstPath = CreateSubsetPdfFile("abc", "123", fontPath);
+        var secondPath = CreateSubsetPdfFile("123", "abc", fontPath);
+
+        try
+        {
+            var combined = CombineDocuments(firstPath, secondPath);
+
+            using (var beforeMerge = new PdfDocument(new PdfReader(new MemoryStream(combined))))
+            {
+                var fontObjectKeys = CollectFontObjectKeys(beforeMerge);
+                Assert.Equal(2, fontObjectKeys.Count);
+
+                var beforeCharacters = CollectFontCharacterMaps(beforeMerge);
+                Assert.Equal(2, beforeCharacters.Count);
+
+                var expectedCharacters = ExpectedSubsetCharacters
+                    .OrderBy(value => value, StringComparer.Ordinal)
+                    .ToList();
+
+                foreach (var characters in beforeCharacters.Values)
+                {
+                    Assert.Equal(ExpectedSubsetCharacters.Length, characters.Count);
+                    Assert.Equal(expectedCharacters, characters.OrderBy(value => value, StringComparer.Ordinal).ToList());
+                }
+            }
+
+            var logger = new TestPdfLogger();
+            var merged = Merge(combined, FontSubsetMergeOptions.CreateDefault(), logger);
+
+            using var afterMerge = new PdfDocument(new PdfReader(new MemoryStream(merged)));
+            var mergedFontObjectKeys = CollectFontObjectKeys(afterMerge);
+            Assert.Single(mergedFontObjectKeys);
+
+            var afterCharacters = CollectFontCharacterMaps(afterMerge);
+            Assert.Single(afterCharacters);
+            var mergedCharacters = afterCharacters.Values.Single();
+            Assert.Equal(ExpectedSubsetCharacters.Length, mergedCharacters.Count);
+            Assert.Equal(
+                ExpectedSubsetCharacters.OrderBy(value => value, StringComparer.Ordinal).ToList(),
+                mergedCharacters.OrderBy(value => value, StringComparer.Ordinal).ToList());
+        }
+        finally
+        {
+            TryDelete(firstPath);
+            TryDelete(secondPath);
+        }
     }
 
     private static byte[] CreateType0Document()
@@ -257,10 +312,87 @@ public class PdfFontSubsetMergerTests
         return result.ToArray();
     }
 
+    private static byte[] CombineDocuments(string firstPath, string secondPath)
+    {
+        using var result = new MemoryStream();
+        using (var writer = new PdfWriter(result))
+        using (var output = new PdfDocument(writer))
+        {
+            var merger = new PdfMerger(output);
+
+            foreach (var path in new[] { firstPath, secondPath })
+            {
+                using var reader = new PdfReader(path);
+                using var document = new PdfDocument(reader);
+                merger.Merge(document, 1, document.GetNumberOfPages());
+            }
+        }
+
+        return result.ToArray();
+    }
+
     private static PdfDictionary GetFontsDictionary(PdfPage page)
     {
         var resources = page.GetResources()?.GetPdfObject();
         return resources?.GetAsDictionary(PdfName.Font) ?? new PdfDictionary();
+    }
+
+    private static HashSet<long> CollectFontObjectKeys(PdfDocument pdfDocument)
+    {
+        var result = new HashSet<long>();
+        var pageCount = pdfDocument.GetNumberOfPages();
+
+        for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+        {
+            var page = pdfDocument.GetPage(pageIndex);
+            var fonts = GetFontsDictionary(page);
+
+            foreach (var name in fonts.KeySet())
+            {
+                var fontDictionary = fonts.GetAsDictionary(name);
+                var reference = fontDictionary?.GetIndirectReference();
+                if (reference == null)
+                {
+                    continue;
+                }
+
+                result.Add(GetReferenceKey(reference));
+            }
+        }
+
+        return result;
+    }
+
+    private static Dictionary<long, HashSet<string>> CollectFontCharacterMaps(PdfDocument pdfDocument)
+    {
+        var result = new Dictionary<long, HashSet<string>>();
+        var pageCount = pdfDocument.GetNumberOfPages();
+
+        for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+        {
+            var page = pdfDocument.GetPage(pageIndex);
+            var fonts = GetFontsDictionary(page);
+
+            foreach (var name in fonts.KeySet())
+            {
+                var fontDictionary = fonts.GetAsDictionary(name);
+                var reference = fontDictionary?.GetIndirectReference();
+                if (fontDictionary == null || reference == null)
+                {
+                    continue;
+                }
+
+                var key = GetReferenceKey(reference);
+                if (result.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                result[key] = ExtractSubsetCharacters(fontDictionary);
+            }
+        }
+
+        return result;
     }
 
     private static List<(string FontResourceName, byte[] Content)> GetFormXObjectFonts(PdfPage page)
@@ -293,6 +425,107 @@ public class PdfFontSubsetMergerTests
         }
 
         return result;
+    }
+
+    private static HashSet<string> ExtractSubsetCharacters(PdfDictionary fontDictionary)
+    {
+        var toUnicode = fontDictionary.GetAsStream(PdfName.ToUnicode);
+        if (toUnicode == null)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var bytes = toUnicode.GetBytes(true);
+        if (bytes.Length == 0)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        var content = Encoding.ASCII.GetString(bytes);
+        return ParseToUnicodeCharacters(content);
+    }
+
+    private static HashSet<string> ParseToUnicodeCharacters(string cmapContent)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (Match block in Regex.Matches(
+                     cmapContent,
+                     @"\d+\s+beginbfchar\s+(?<entries>.*?)\s+endbfchar",
+                     RegexOptions.Singleline))
+        {
+            var entries = block.Groups["entries"].Value;
+            foreach (Match entry in Regex.Matches(entries, @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", RegexOptions.Singleline))
+            {
+                result.Add(DecodeHexToString(entry.Groups[2].Value));
+            }
+        }
+
+        foreach (Match block in Regex.Matches(
+                     cmapContent,
+                     @"\d+\s+beginbfrange\s+(?<entries>.*?)\s+endbfrange",
+                     RegexOptions.Singleline))
+        {
+            var entries = block.Groups["entries"].Value;
+            foreach (Match entry in Regex.Matches(
+                         entries,
+                         @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?<target>(?:<[^>]+>)|(?:\[(?:\s*<[^>]+>\s*)+\]))",
+                         RegexOptions.Singleline))
+            {
+                var start = int.Parse(entry.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                var end = int.Parse(entry.Groups[2].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                var target = entry.Groups["target"].Value;
+
+                if (target.StartsWith("[", StringComparison.Ordinal))
+                {
+                    foreach (Match targetMatch in Regex.Matches(target, @"<([0-9A-Fa-f]+)>", RegexOptions.Singleline))
+                    {
+                        result.Add(DecodeHexToString(targetMatch.Groups[1].Value));
+                    }
+
+                    continue;
+                }
+
+                var baseHex = target.Trim('<', '>');
+                var baseValue = int.Parse(baseHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                var glyphCount = end - start + 1;
+
+                for (var offset = 0; offset < glyphCount; offset++)
+                {
+                    var value = baseValue + offset;
+                    var hex = value.ToString("X" + baseHex.Length, CultureInfo.InvariantCulture);
+                    result.Add(DecodeHexToString(hex));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static string DecodeHexToString(string hex)
+    {
+        if (hex.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (hex.Length % 2 != 0)
+        {
+            hex = "0" + hex;
+        }
+
+        var bytes = new byte[hex.Length / 2];
+        for (var index = 0; index < hex.Length; index += 2)
+        {
+            bytes[index / 2] = byte.Parse(hex.Substring(index, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        }
+
+        return Encoding.BigEndianUnicode.GetString(bytes);
+    }
+
+    private static long GetReferenceKey(PdfIndirectReference reference)
+    {
+        return ((long)reference.GetObjNumber() << 32) | (uint)reference.GetGenNumber();
     }
 
     private static List<string> ExtractFontResourceNames(byte[] content)
@@ -352,6 +585,45 @@ public class PdfFontSubsetMergerTests
 
         throw new FileNotFoundException(
             $"Test font not found. Looked for {string.Join(", ", candidates)} in {string.Join(", ", searchRoots)}.");
+    }
+
+    private static string CreateSubsetPdfFile(string visibleText, string additionalGlyphsText, string fontPath)
+    {
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".pdf");
+
+        using (var writer = new PdfWriter(path))
+        using (var pdf = new PdfDocument(writer))
+        {
+            var page = pdf.AddNewPage(PageSize.A4);
+            var font = PdfFontFactory.CreateFont(fontPath, PdfEncodings.IDENTITY_H);
+            font.SetSubset(true);
+
+            var canvas = new PdfCanvas(page);
+            canvas.BeginText();
+            canvas.SetFontAndSize(font, 12);
+            canvas.MoveText(36, 760);
+            canvas.ShowText(visibleText);
+            canvas.EndText();
+
+            if (!string.IsNullOrEmpty(additionalGlyphsText))
+            {
+                canvas.BeginText();
+                canvas.SetFontAndSize(font, 12);
+                canvas.MoveText(36, -100);
+                canvas.ShowText(additionalGlyphsText);
+                canvas.EndText();
+            }
+        }
+
+        return path;
+    }
+
+    private static void TryDelete(string path)
+    {
+        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        {
+            File.Delete(path);
+        }
     }
 
     private static IEnumerable<string> GetFontDirectories()
