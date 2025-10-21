@@ -128,6 +128,7 @@ public static class PdfSmartCropper
             : $"Starting PDF merging for {inputs.Count} document(s)";
         logger.LogInfo(message);
         progress?.Report(message);
+        await Task.Yield();
 
         try
         {
@@ -139,10 +140,12 @@ public static class PdfSmartCropper
             var completionMessage = $"{operationName} completed successfully";
             logger.LogInfo(completionMessage);
             progress?.Report(completionMessage);
+            await Task.Yield();
             
             var timeMessage = $"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}";
             logger.LogInfo(timeMessage);
             progress?.Report(timeMessage);
+            await Task.Yield();
 
             var finalResult = ApplyXmpOptimizations(resultBytes, optimizationSettings, logger);
             
@@ -237,6 +240,7 @@ public static class PdfSmartCropper
             var docMessage = $"Processing document {documentIndex}/{inputs.Count}";
             logger.LogInfo(docMessage);
             progress?.Report(docMessage);
+            await Task.Yield();
             
             var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, progress, ct).ConfigureAwait(false);
             
@@ -298,6 +302,7 @@ public static class PdfSmartCropper
         var startMessage = $"Processing PDF with {pageCount} page(s) using {cropSettings.Method} method";
         logger.LogInfo(startMessage);
         progress?.Report(startMessage);
+        await Task.Yield();
 
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
@@ -328,6 +333,7 @@ public static class PdfSmartCropper
             if (pageIndex % 5 == 1 || pageCount <= 10)
             {
                 progress?.Report(sizeMessage);
+                await Task.Yield();
             }
 
             if (IsPageEmpty(page, ct))
@@ -372,6 +378,7 @@ public static class PdfSmartCropper
                 var detectionMessage = $"Identified {detected.Count} repeated content object(s) across {analyzedPages} analyzed page(s)";
                 logger.LogInfo(detectionMessage);
                 progress?.Report(detectionMessage);
+                await Task.Yield();
             }
         }
 
@@ -448,6 +455,7 @@ public static class PdfSmartCropper
             if (pageIndex % 5 == 0 || pageIndex == pageCount || pageCount <= 10)
             {
                 progress?.Report($"Completed page {pageIndex}/{pageCount}");
+                await Task.Yield();
             }
             
             await Task.Yield();
