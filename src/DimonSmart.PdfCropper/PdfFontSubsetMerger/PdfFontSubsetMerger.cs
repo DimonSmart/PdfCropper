@@ -81,7 +81,7 @@ public static class PdfFontSubsetMerger
                     }
 
                     var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\".";
-                    new FontMergeLogEvent(2005, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, mergeMessage).Log(logger);
                 }
             }
 
@@ -414,7 +414,7 @@ public static class PdfFontSubsetMerger
             foreach (var group in groups)
             {
                 var message = $"Updated Tf operator from \"/{group.OldName}\" to \"/{group.NewName}\" in {context} ({group.Count} occurrence(s)).";
-                new FontMergeLogEvent(2050, FontMergeLogLevel.Info, message).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.TextOperatorUpdated, FontMergeLogLevel.Info, message).Log(logger);
             }
         }
 
@@ -440,7 +440,7 @@ public static class PdfFontSubsetMerger
 
                     fontsDictionary.Remove(name);
                     var message = $"Removed unused font resource \"/{value}\" from fonts dictionary.";
-                    new FontMergeLogEvent(2060, FontMergeLogLevel.Info, message).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.UnusedFontResourceRemoved, FontMergeLogLevel.Info, message).Log(logger);
                 }
             }
         }
@@ -483,7 +483,7 @@ public static class PdfFontSubsetMerger
                         RenameMap[oldName.GetValue()] = newName.GetValue();
 
                         var message = $"Replaced font resource key \"/{oldName.GetValue()}\" with \"/{newName.GetValue()}\" for \"{replacement.CanonicalName}\".";
-                        new FontMergeLogEvent(2040, FontMergeLogLevel.Info, message).Log(logger);
+                        new FontMergeLogEvent(FontMergeLogEventId.FontResourceKeyReplaced, FontMergeLogLevel.Info, message).Log(logger);
                     }
 
                     FontsDictionary.Put(newName, replacement.ReplacementObject);
@@ -1026,7 +1026,7 @@ public static class PdfFontSubsetMerger
             {
                 var codesCount = entry.EncounteredCodes.Count;
                 var message = $"Collected {codesCount} glyph codes for font \"{entry.CanonicalName}\" (resource {entry.ResourceName.GetValue()}).";
-                new FontMergeLogEvent(2010, FontMergeLogLevel.Info, message).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.GlyphCodesCollected, FontMergeLogLevel.Info, message).Log(logger);
             }
 
             return result;
@@ -1083,7 +1083,7 @@ public static class PdfFontSubsetMerger
             if (!options.IsSupportedFontSubtype(subtype))
             {
                 var skipMessage = $"Skipped subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} due to unsupported subtype \"{subtype}\".";
-                new FontMergeLogEvent(2001, FontMergeLogLevel.Warning, skipMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype, FontMergeLogLevel.Warning, skipMessage).Log(logger);
                 return;
             }
 
@@ -1097,7 +1097,7 @@ public static class PdfFontSubsetMerger
             entries[key] = entry;
 
             var indexMessage = $"Indexed subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} with canonical name \"{canonicalName}\".";
-            new FontMergeLogEvent(2000, FontMergeLogLevel.Info, indexMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, indexMessage).Log(logger);
         }
 
         private void CollectFromFormXObjects(PdfDictionary resources, int pageNumber)
@@ -1251,7 +1251,7 @@ public static class PdfFontSubsetMerger
             {
                 var canonicalName = fonts[0].CanonicalName;
                 var message = $"Split {fonts.Count} subset fonts for \"{canonicalName}\" into {clusters.Count} clusters due to incompatible ToUnicode maps or metrics.";
-                new FontMergeLogEvent(2020, FontMergeLogLevel.Info, message).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontClustersSplit, FontMergeLogLevel.Info, message).Log(logger);
             }
 
             return clusters;
@@ -2531,7 +2531,7 @@ public static class PdfFontSubsetMerger
             SubsetFontDictionaryCleaner.CleanTrueType(context.Canonical.FontDictionary);
 
             var prepareMessage = $"Prepared TrueType subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
-            new FontMergeLogEvent(2030, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).Log(logger);
 
             MergeWidths(context);
             MergeToUnicode(context);
@@ -2556,7 +2556,7 @@ public static class PdfFontSubsetMerger
                 canonical.FontDictionary.Remove(PdfName.Widths);
 
                 var emptyMessage = $"No glyph widths available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
                 return;
             }
 
@@ -2578,7 +2578,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = entry.BuildWidthConflictDescription();
                     var warning = $"Width conflict for glyph code {code} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
-                    new FontMergeLogEvent(2031, FontMergeLogLevel.Warning, warning).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
                 }
             }
 
@@ -2588,7 +2588,7 @@ public static class PdfFontSubsetMerger
             fontDictionary.Put(PdfName.Widths, widthsArray);
 
             var mergeMessage = $"Merged {ordered.Count} glyph widths for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(2031, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
         }
 
         private void MergeToUnicode(FontSubsetMergeContext context)
@@ -2610,7 +2610,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildUnicodeConflictDescription();
                     var warning = $"Unicode conflict for glyph code {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
-                    new FontMergeLogEvent(2032, FontMergeLogLevel.Warning, warning).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
                 }
             }
 
@@ -2618,7 +2618,7 @@ public static class PdfFontSubsetMerger
             {
                 canonical.FontDictionary.Remove(PdfName.ToUnicode);
                 var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(2032, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
                 return;
             }
 
@@ -2626,7 +2626,7 @@ public static class PdfFontSubsetMerger
             canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
 
             var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(2032, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
         }
 
         private void MergeFontFile(FontSubsetMergeContext context)
@@ -2637,7 +2637,7 @@ public static class PdfFontSubsetMerger
             if (descriptor == null)
             {
                 var message = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
-                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, message).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, message).Log(logger);
                 return;
             }
 
@@ -2661,7 +2661,7 @@ public static class PdfFontSubsetMerger
             var resultMessage = sourceStream != null
                 ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
                 : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
-            new FontMergeLogEvent(2033, FontMergeLogLevel.Info, resultMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).Log(logger);
         }
     }
 
@@ -2685,7 +2685,7 @@ public static class PdfFontSubsetMerger
             SubsetFontDictionaryCleaner.CleanType0(context.Canonical.FontDictionary);
 
             var prepareMessage = $"Prepared Type0 subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
-            new FontMergeLogEvent(2030, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).Log(logger);
 
             MergeWidths(context);
             MergeToUnicode(context);
@@ -2702,7 +2702,7 @@ public static class PdfFontSubsetMerger
             if (cidFont == null)
             {
                 var message = $"Skipped width merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
-                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, message).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, message).Log(logger);
                 return;
             }
 
@@ -2715,7 +2715,7 @@ public static class PdfFontSubsetMerger
             {
                 cidFont.Remove(PdfName.W);
                 var emptyMessage = $"No CID widths available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(2031, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
                 return;
             }
 
@@ -2754,7 +2754,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildWidthConflictDescription();
                     var warning = $"Width conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
-                    new FontMergeLogEvent(2031, FontMergeLogLevel.Warning, warning).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
                 }
             }
 
@@ -2762,7 +2762,7 @@ public static class PdfFontSubsetMerger
             cidFont.Put(PdfName.W, widthsArray);
 
             var mergeMessage = $"Merged {ordered.Count} CID widths for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(2031, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
         }
 
         private static void AppendWidthRange(PdfArray target, int startCode, List<float> widths)
@@ -2801,7 +2801,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildUnicodeConflictDescription();
                     var warning = $"Unicode conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
-                    new FontMergeLogEvent(2032, FontMergeLogLevel.Warning, warning).Log(logger);
+                    new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
                 }
             }
 
@@ -2809,7 +2809,7 @@ public static class PdfFontSubsetMerger
             {
                 canonical.FontDictionary.Remove(PdfName.ToUnicode);
                 var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(2032, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
                 return;
             }
 
@@ -2817,7 +2817,7 @@ public static class PdfFontSubsetMerger
             canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
 
             var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(2032, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
         }
 
         private void MergeFontFile(FontSubsetMergeContext context)
@@ -2827,7 +2827,7 @@ public static class PdfFontSubsetMerger
             if (cidFont == null)
             {
                 var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
-                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).Log(logger);
                 return;
             }
 
@@ -2835,7 +2835,7 @@ public static class PdfFontSubsetMerger
             if (descriptor == null)
             {
                 var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
-                new FontMergeLogEvent(2033, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).Log(logger);
                 return;
             }
 
@@ -2861,7 +2861,7 @@ public static class PdfFontSubsetMerger
             var resultMessage = sourceStream != null
                 ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
                 : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
-            new FontMergeLogEvent(2033, FontMergeLogLevel.Info, resultMessage).Log(logger);
+            new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).Log(logger);
         }
     }
 

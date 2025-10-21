@@ -2,7 +2,7 @@ using DimonSmart.PdfCropper;
 
 namespace DimonSmart.PdfCropper.PdfFontSubsetMerger;
 
-public readonly record struct FontMergeLogEvent(int Id, FontMergeLogLevel Level, string Message)
+public readonly record struct FontMergeLogEvent(FontMergeLogEventId Id, FontMergeLogLevel Level, string Message)
 {
     public void Log(IPdfCropLogger logger)
     {
