@@ -7,31 +7,34 @@ namespace DimonSmart.PdfCropper.Cli;
 /// </summary>
 internal sealed class ConsoleLogger(LogLevel minimumLevel) : IPdfCropLogger
 {
-    public void LogInfo(string message)
+    public Task LogInfoAsync(string message)
     {
-        if (!IsEnabled(LogLevel.Information)) return;
+        if (!IsEnabled(LogLevel.Information)) return Task.CompletedTask;
 
         Console.WriteLine($"[INFO] {message}");
+        return Task.CompletedTask;
     }
 
-    public void LogWarning(string message)
+    public Task LogWarningAsync(string message)
     {
-        if (!IsEnabled(LogLevel.Warning)) return;
+        if (!IsEnabled(LogLevel.Warning)) return Task.CompletedTask;
 
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine($"[WARN] {message}");
         Console.ForegroundColor = oldColor;
+        return Task.CompletedTask;
     }
 
-    public void LogError(string message)
+    public Task LogErrorAsync(string message)
     {
-        if (!IsEnabled(LogLevel.Error)) return;
+        if (!IsEnabled(LogLevel.Error)) return Task.CompletedTask;
 
         var oldColor = Console.ForegroundColor;
         Console.ForegroundColor = ConsoleColor.Red;
         Console.Error.WriteLine($"[ERROR] {message}");
         Console.ForegroundColor = oldColor;
+        return Task.CompletedTask;
     }
 
     private bool IsEnabled(LogLevel logLevel)

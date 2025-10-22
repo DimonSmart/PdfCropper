@@ -109,7 +109,7 @@ public static class PdfSmartCropper
         }
 
         logger ??= NullLogger.Instance;
-        LogOptimizationSettings(logger, optimizationSettings, operationDescription);
+        await LogOptimizationSettingsAsync(logger, optimizationSettings, operationDescription).ConfigureAwait(false);
 
         return await ExecuteAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct).ConfigureAwait(false);
     }
@@ -131,7 +131,7 @@ public static class PdfSmartCropper
         var message = inputs.Count == 1 
             ? $"Input PDF size: {inputs[0].Length:N0} bytes"
             : $"Starting PDF merging for {inputs.Count} document(s)";
-        logger.LogInfo(message);
+        await logger.LogInfoAsync(message).ConfigureAwait(false);
         progress?.Report(message);
         await Task.Yield();
 
@@ -143,62 +143,62 @@ public static class PdfSmartCropper
 
             totalStopwatch.Stop();
             var completionMessage = $"{operationName} completed successfully";
-            logger.LogInfo(completionMessage);
+            await logger.LogInfoAsync(completionMessage).ConfigureAwait(false);
             progress?.Report(completionMessage);
             await Task.Yield();
             
             var timeMessage = $"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}";
-            logger.LogInfo(timeMessage);
+            await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
             progress?.Report(timeMessage);
             await Task.Yield();
 
-            var finalResult = ApplyXmpOptimizations(resultBytes, optimizationSettings, logger);
+            var finalResult = await ApplyXmpOptimizationsAsync(resultBytes, optimizationSettings, logger).ConfigureAwait(false);
             
-            LogSizeComparison(totalInputSize, finalResult.Length, logger);
+            await LogSizeComparisonAsync(totalInputSize, finalResult.Length, logger).ConfigureAwait(false);
 
             return finalResult;
         }
         catch (OperationCanceledException)
         {
-            HandleCancellation(logger, $"{operationName} cancelled");
+            await HandleCancellationAsync(logger, $"{operationName} cancelled").ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
         {
-            HandleProcessingException(ex, logger);
+            await HandleProcessingExceptionAsync(ex, logger).ConfigureAwait(false);
             throw;
         }
     }
 
-    private static void LogOptimizationSettings(
+    private static async Task LogOptimizationSettingsAsync(
         IPdfCropLogger logger,
         PdfOptimizationSettings optimizationSettings,
         string operationDescription)
     {
-        logger.LogInfo($"Starting {operationDescription} with optimization settings:");
+        await logger.LogInfoAsync($"Starting {operationDescription} with optimization settings:").ConfigureAwait(false);
 
         if (optimizationSettings.CompressionLevel.HasValue)
         {
-            logger.LogInfo($"  Compression level: {optimizationSettings.CompressionLevel.Value}");
+            await logger.LogInfoAsync($"  Compression level: {optimizationSettings.CompressionLevel.Value}").ConfigureAwait(false);
         }
         else
         {
-            logger.LogInfo("  Compression level: Default");
+            await logger.LogInfoAsync("  Compression level: Default").ConfigureAwait(false);
         }
 
         if (optimizationSettings.TargetPdfVersion != null)
         {
-            logger.LogInfo($"  Target PDF version: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}");
+            await logger.LogInfoAsync($"  Target PDF version: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}").ConfigureAwait(false);
         }
         else
         {
-            logger.LogInfo("  Target PDF version: Original");
+            await logger.LogInfoAsync("  Target PDF version: Original").ConfigureAwait(false);
         }
 
-        logger.LogInfo($"  Full compression: {optimizationSettings.EnableFullCompression}");
-        logger.LogInfo($"  Smart mode: {optimizationSettings.EnableSmartMode}");
-        logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
-        logger.LogInfo($"  Merge duplicate font subsets: {optimizationSettings.MergeDuplicateFontSubsets}");
+        await logger.LogInfoAsync($"  Full compression: {optimizationSettings.EnableFullCompression}").ConfigureAwait(false);
+        await logger.LogInfoAsync($"  Smart mode: {optimizationSettings.EnableSmartMode}").ConfigureAwait(false);
+        await logger.LogInfoAsync($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}").ConfigureAwait(false);
+        await logger.LogInfoAsync($"  Merge duplicate font subsets: {optimizationSettings.MergeDuplicateFontSubsets}").ConfigureAwait(false);
     }
 
     private static async Task<byte[]> ProcessSingleDocumentAsync(
@@ -244,7 +244,7 @@ public static class PdfSmartCropper
             documentIndex++;
             
             var docMessage = $"Processing document {documentIndex}/{inputs.Count}";
-            logger.LogInfo(docMessage);
+            await logger.LogInfoAsync(docMessage).ConfigureAwait(false);
             progress?.Report(docMessage);
             await Task.Yield();
             
@@ -279,7 +279,7 @@ public static class PdfSmartCropper
     {
         ct.ThrowIfCancellationRequested();
 
-        logger.LogInfo($"Input PDF size: {inputPdf.Length:N0} bytes");
+        await logger.LogInfoAsync($"Input PDF size: {inputPdf.Length:N0} bytes").ConfigureAwait(false);
 
         using var inputStream = new MemoryStream(inputPdf, writable: false);
         using var outputStream = new MemoryStream();
@@ -306,13 +306,13 @@ public static class PdfSmartCropper
     {
         var pageCount = pdfDocument.GetNumberOfPages();
         var startMessage = $"Processing PDF with {pageCount} page(s) using {cropSettings.Method} method";
-        logger.LogInfo(startMessage);
+        await logger.LogInfoAsync(startMessage).ConfigureAwait(false);
         progress?.Report(startMessage);
         await Task.Yield();
 
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
-            logger.LogInfo($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection");
+            await logger.LogInfoAsync($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection").ConfigureAwait(false);
         }
 
         var shouldDetectRepeatedObjects =
@@ -334,7 +334,7 @@ public static class PdfSmartCropper
             var pageSize = page.GetPageSize();
 
             var sizeMessage = $"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts";
-            logger.LogInfo(sizeMessage);
+            await logger.LogInfoAsync(sizeMessage).ConfigureAwait(false);
             
             if (pageIndex % 5 == 1 || pageCount <= 10)
             {
@@ -344,11 +344,11 @@ public static class PdfSmartCropper
 
             if (IsPageEmpty(page, ct))
             {
-                logger.LogWarning($"Page {pageIndex}: Skipped (empty page)");
+                await logger.LogWarningAsync($"Page {pageIndex}: Skipped (empty page)").ConfigureAwait(false);
                 pageStopwatch.Stop();
                 var elapsed = pageStopwatch.Elapsed;
                 pageDurations[pageIndex - 1] = elapsed;
-                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(elapsed)}");
+                await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(elapsed)}").ConfigureAwait(false);
                 skippedPages[pageIndex - 1] = true;
                 
                 await Task.Yield();
@@ -382,7 +382,7 @@ public static class PdfSmartCropper
                 repeatedObjects = detected;
                 var analyzedPages = repeatedDetectionAnalyses!.Count(static analysis => analysis != null);
                 var detectionMessage = $"Identified {detected.Count} repeated content object(s) across {analyzedPages} analyzed page(s)";
-                logger.LogInfo(detectionMessage);
+                await logger.LogInfoAsync(detectionMessage).ConfigureAwait(false);
                 progress?.Report(detectionMessage);
                 await Task.Yield();
             }
@@ -430,33 +430,33 @@ public static class PdfSmartCropper
                 var bounds = ContentBasedCroppingStrategy.CalculateBounds(analysis);
                 if (bounds.HasValue)
                 {
-                    logger.LogInfo($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})");
+                    await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
                     cropRectangle = bounds.Value.ToRectangle(pageSize, cropSettings.Margin);
                 }
             }
 
             if (cropRectangle == null)
             {
-                logger.LogWarning($"Page {pageIndex}: No crop applied (no content bounds found)");
+                await logger.LogWarningAsync($"Page {pageIndex}: No crop applied (no content bounds found)").ConfigureAwait(false);
                 var totalTime = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
-                logger.LogInfo($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}");
+                await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}").ConfigureAwait(false);
                 
                 await Task.Yield();
                 continue;
             }
 
-            logger.LogInfo($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})");
+            await logger.LogInfoAsync($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})").ConfigureAwait(false);
 
             page.SetCropBox(cropRectangle);
             page.SetTrimBox(cropRectangle);
 
             var croppedMessage = $"Page {pageIndex}: Cropped size = {cropRectangle.GetWidth():F2} x {cropRectangle.GetHeight():F2} pts";
-            logger.LogInfo(croppedMessage);
+            await logger.LogInfoAsync(croppedMessage).ConfigureAwait(false);
 
             pageStopwatch.Stop();
             var totalDuration = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
             var timeMessage = $"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}";
-            logger.LogInfo(timeMessage);
+            await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
             
             if (pageIndex % 5 == 0 || pageIndex == pageCount || pageCount <= 10)
             {
@@ -566,27 +566,27 @@ public static class PdfSmartCropper
             : $"{elapsed.TotalSeconds:F2} s";
     }
 
-    private static void HandleCancellation(IPdfCropLogger logger, string operationName)
+    private static async Task HandleCancellationAsync(IPdfCropLogger logger, string operationName)
     {
-        logger.LogWarning(operationName);
+        await logger.LogWarningAsync(operationName).ConfigureAwait(false);
     }
 
-    private static void LogSizeComparison(long originalSize, long newSize, IPdfCropLogger logger)
+    private static async Task LogSizeComparisonAsync(long originalSize, long newSize, IPdfCropLogger logger)
     {
         var sizeReduction = originalSize - newSize;
         var percentReduction = originalSize > 0 ? (double)sizeReduction / originalSize * 100 : 0;
 
         if (sizeReduction > 0)
         {
-            logger.LogInfo($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)");
+            await logger.LogInfoAsync($"Size reduction: {sizeReduction:N0} bytes ({percentReduction:F1}%)").ConfigureAwait(false);
         }
         else if (sizeReduction < 0)
         {
-            logger.LogInfo($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)");
+            await logger.LogInfoAsync($"Size increase: {-sizeReduction:N0} bytes ({-percentReduction:F1}%)").ConfigureAwait(false);
         }
         else
         {
-            logger.LogInfo("No size change");
+            await logger.LogInfoAsync("No size change").ConfigureAwait(false);
         }
     }
 
@@ -603,9 +603,9 @@ public static class PdfSmartCropper
         return writer;
     }
 
-    private static byte[] ApplyXmpOptimizations(byte[] inputBytes, PdfOptimizationSettings optimizationSettings, IPdfCropLogger logger)
+    private static async Task<byte[]> ApplyXmpOptimizationsAsync(byte[] inputBytes, PdfOptimizationSettings optimizationSettings, IPdfCropLogger logger)
     {
-        logger.LogInfo($"Output PDF size before final optimization: {inputBytes.Length:N0} bytes");
+        await logger.LogInfoAsync($"Output PDF size before final optimization: {inputBytes.Length:N0} bytes").ConfigureAwait(false);
 
         var resultBytes = optimizationSettings.RemoveXmpMetadata
             ? PdfXmpCleaner.RemoveXmpMetadata(inputBytes, optimizationSettings)
@@ -613,7 +613,7 @@ public static class PdfSmartCropper
 
         if (optimizationSettings.RemoveXmpMetadata)
         {
-            logger.LogInfo($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes");
+            await logger.LogInfoAsync($"Output PDF size after XMP removal: {resultBytes.Length:N0} bytes").ConfigureAwait(false);
         }
 
         return resultBytes;
@@ -640,31 +640,31 @@ public static class PdfSmartCropper
         }
     }
 
-    private static void HandleProcessingException(Exception ex, IPdfCropLogger logger)
+    private static async Task HandleProcessingExceptionAsync(Exception ex, IPdfCropLogger logger)
     {
         switch (ex)
         {
             case BadPasswordException:
-                logger.LogError($"PDF is encrypted: {ex.Message}");
+                await logger.LogErrorAsync($"PDF is encrypted: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
             
             case PdfCropException:
                 return;
             
             case PdfException when IsEncryptionError((PdfException)ex):
-                logger.LogError($"PDF encryption error: {ex.Message}");
+                await logger.LogErrorAsync($"PDF encryption error: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
             
             case PdfException:
-                logger.LogError($"Invalid PDF: {ex.Message}");
+                await logger.LogErrorAsync($"Invalid PDF: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
             
             case IOException:
-                logger.LogError($"I/O error: {ex.Message}");
+                await logger.LogErrorAsync($"I/O error: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
             
             default:
-                logger.LogError($"Processing error: {ex.Message}");
+                await logger.LogErrorAsync($"Processing error: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
         }
     }

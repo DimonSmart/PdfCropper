@@ -846,11 +846,23 @@ public sealed class TestPdfLogger : IPdfCropLogger
 
     public IReadOnlyList<LogEvent> Events => events;
 
-    public void LogInfo(string message) => Add(InfoLevel, message);
+    public Task LogInfoAsync(string message)
+    {
+        Add(InfoLevel, message);
+        return Task.CompletedTask;
+    }
 
-    public void LogWarning(string message) => Add(WarningLevel, message);
+    public Task LogWarningAsync(string message)
+    {
+        Add(WarningLevel, message);
+        return Task.CompletedTask;
+    }
 
-    public void LogError(string message) => Add(ErrorLevel, message);
+    public Task LogErrorAsync(string message)
+    {
+        Add(ErrorLevel, message);
+        return Task.CompletedTask;
+    }
 
     private void Add(string level, string message)
     {
