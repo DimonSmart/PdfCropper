@@ -1,24 +1,18 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using DimonSmart.PdfCropper;
-using DimonSmart.PdfCropper.PdfFontSubsetMerger;
+﻿using DimonSmart.PdfCropper.PdfFontSubsetMerger;
 using iText.IO.Font;
+using iText.Kernel.Font;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Pdf.Canvas.Parser;
-using iText.Kernel.Pdf.Xobject;
 using iText.Kernel.Utils;
-using iText.Kernel.Font;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using Xunit;
 using Xunit.Abstractions;
-
 using FontSubsetMerger = DimonSmart.PdfCropper.PdfFontSubsetMerger.PdfFontSubsetMerger;
+using Path = System.IO.Path;
 
 namespace DimonSmart.PdfCropper.Tests;
 
@@ -89,7 +83,7 @@ public class PdfFontSubsetMergerTests
         Assert.Single(pageFontNames);
         Assert.Equal(canonicalResourceName, pageFontNames[0]);
 
-        var xObjectResources = GetFormXObjectFonts(page);
+        var xObjectResources = GetFormXObjectFontResources(page);
         Assert.Single(xObjectResources);
         Assert.Equal(canonicalResourceName, xObjectResources[0].FontResourceName);
         Assert.All(xObjectResources, entry =>
@@ -97,7 +91,7 @@ public class PdfFontSubsetMergerTests
             var names = ExtractFontResourceNames(entry.Content);
             Assert.True(names.All(name => name == canonicalResourceName));
         });
-        Assert.Equal(Type0PageText + Type0FormText, ExtractedText(page));
+        Assert.Equal(Type0PageText + Type0FormText, ExtractText(page));
     }
 
     [Fact]
@@ -119,7 +113,7 @@ public class PdfFontSubsetMergerTests
 
         var pageFontNames = ExtractFontResourceNames(page.GetContentBytes());
         Assert.True(pageFontNames.All(name => name == canonicalResourceName));
-        Assert.Equal(TrueTypeLineOne + TrueTypeLineTwo, ExtractedText(page));
+        Assert.Equal(TrueTypeLineOne + TrueTypeLineTwo, ExtractText(page));
     }
 
     [Fact]
@@ -143,7 +137,7 @@ public class PdfFontSubsetMergerTests
     public void MergeDuplicateSubsets_WithUnsupportedCidFontType0_LogsWarningAndSkips()
     {
         var source = CreateType0Document();
-        var withCidFont = InjectUnsupportedCidFontType0(source);
+        var withCidFont = InjectUnsupportedCIDFontType0(source);
         var logger = new TestPdfLogger();
 
         var options = new FontSubsetMergeOptions
@@ -235,7 +229,7 @@ public class PdfFontSubsetMergerTests
                 expectedOrderedCharacters,
                 mergedCharacters.OrderBy(value => value, StringComparer.Ordinal).ToList());
 
-            LogLoggerEvents(logger);
+            LogMergeLoggerEvents(logger);
         }
         finally
         {
@@ -254,10 +248,7 @@ public class PdfFontSubsetMergerTests
         long secondDocumentSize,
         IReadOnlyCollection<string> expectedCharacters)
     {
-        if (output == null)
-        {
-            return;
-        }
+        if (output == null) return;
 
         output.WriteLine($"Scenario: {scenario}");
         output.WriteLine($"  First document visible text: \"{firstVisibleText}\"");
@@ -321,7 +312,7 @@ public class PdfFontSubsetMergerTests
             $"  Size reduction: {difference} bytes ({percent.ToString("F2", CultureInfo.InvariantCulture)}%)");
     }
 
-    private void LogLoggerEvents(TestPdfLogger logger)
+    private void LogMergeLoggerEvents(TestPdfLogger logger)
     {
         if (output == null)
         {
@@ -416,6 +407,11 @@ public class PdfFontSubsetMergerTests
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// Deliberately introduces a width conflict into the second TrueType font by
+    /// bumping the first width entry. This forces the merger to split clusters,
+    /// simulating PDFs produced from different hmtx sources.
+    /// </summary>
     private static byte[] IntroduceWidthConflict(byte[] pdfBytes)
     {
         using var result = new MemoryStream();
@@ -448,7 +444,11 @@ public class PdfFontSubsetMergerTests
         return result.ToArray();
     }
 
-    private static byte[] InjectUnsupportedCidFontType0(byte[] pdfBytes)
+    /// <summary>
+    /// Inserts a dummy CIDFontType0 entry into the page resources to verify that
+    /// unsupported subtypes are logged and skipped by the merger.
+    /// </summary>
+    private static byte[] InjectUnsupportedCIDFontType0(byte[] pdfBytes)
     {
         using var result = new MemoryStream();
         using (var pdf = new PdfDocument(new PdfReader(new MemoryStream(pdfBytes)), new PdfWriter(result)))
@@ -561,7 +561,7 @@ public class PdfFontSubsetMergerTests
         return result;
     }
 
-    private static List<(string FontResourceName, byte[] Content)> GetFormXObjectFonts(PdfPage page)
+    private static List<(string FontResourceName, byte[] Content)> GetFormXObjectFontResources(PdfPage page)
     {
         var resources = page.GetResources()?.GetPdfObject();
         var xObjects = resources?.GetAsDictionary(PdfName.XObject);
@@ -608,35 +608,90 @@ public class PdfFontSubsetMergerTests
         }
 
         var content = Encoding.ASCII.GetString(bytes);
-        return ParseToUnicodeCharacters(content);
+        return ParseToUnicodeCMapCharacters(content);
     }
 
-    private static HashSet<string> ParseToUnicodeCharacters(string cmapContent)
+
+
+    /// <summary>
+    /// Matches an entire bfchar block like:
+    /// 2 beginbfchar
+    /// <01> <0041>
+    /// <02> <0042>
+    /// endbfchar
+    /// </summary>
+    private static readonly Regex s_bfcharBlock = new(@"\d+\s+beginbfchar\s+(?<entries>.*?)\s+endbfchar", RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /*
+Matches an entire bfrange block. Examples:
+
+
+(1) Simple ranges with a single base target:
+
+
+3 beginbfrange
+<10> <12> <0041>
+<20> <22> <0061>
+<30> <30> <007A>
+endbfrange
+
+
+(2) Ranges with an explicit target array (each target is mapped positionally):
+
+
+2 beginbfrange
+<20> <22> [ <0061> <0062> <0063> ]
+<30> <31> [<0041><0042>]
+endbfrange
+
+
+Named group `entries` captures everything between beginbfrange/endbfrange.
+*/
+    private static readonly Regex s_bfrangeBlock = new(@"\d+\s+beginbfrange\s+(?<entries>.*?)\s+endbfrange", RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /*
+Matches a single hex pair "<src> <dst>" (used inside bfchar or expanded bfrange arrays).
+Examples (each line is a separate match):
+
+
+<01> <0041> // Group 1: 01, Group 2: 0041
+<000D> <000A> // Group 1: 000D, Group 2: 000A
+<01><0041> // Also matches; whitespace between tokens is optional
+*/
+    private static readonly Regex s_hexPair = new(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /*
+Matches a single hex token "<XXXX>". Useful for pulling all targets from an array.
+Examples (each token is a separate match):
+
+
+<0041>
+[ <0061> <0062> <0063> ] // Matches <0061>, <0062>, <0063>
+<00a0> <00A0> // Mixed case is accepted
+*/
+    private static readonly Regex s_hexArray = new(@"<([0-9A-Fa-f]+)>", RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static HashSet<string> ParseToUnicodeCMapCharacters(string cmapContent)
     {
+        // Parses glyph→Unicode mappings from ToUnicode CMap.
+        // Only the forms used by iText test PDFs are handled (bfchar/bfrange).
+        // This is intentionally minimal and test‑oriented; not a full CMap parser.
         var result = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (Match block in Regex.Matches(
-                     cmapContent,
-                     @"\d+\s+beginbfchar\s+(?<entries>.*?)\s+endbfchar",
-                     RegexOptions.Singleline))
+
+        foreach (Match block in s_bfcharBlock.Matches(cmapContent))
         {
             var entries = block.Groups["entries"].Value;
-            foreach (Match entry in Regex.Matches(entries, @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", RegexOptions.Singleline))
-            {
+            foreach (Match entry in s_hexPair.Matches(entries))
                 result.Add(DecodeHexToString(entry.Groups[2].Value));
-            }
         }
 
-        foreach (Match block in Regex.Matches(
-                     cmapContent,
-                     @"\d+\s+beginbfrange\s+(?<entries>.*?)\s+endbfrange",
-                     RegexOptions.Singleline))
+        foreach (Match block in s_bfrangeBlock.Matches(cmapContent))
         {
             var entries = block.Groups["entries"].Value;
-            foreach (Match entry in Regex.Matches(
-                         entries,
-                         @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?<target>(?:<[^>]+>)|(?:\[(?:\s*<[^>]+>\s*)+\]))",
-                         RegexOptions.Singleline))
+            foreach (Match entry in Regex.Matches(entries,
+            @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?<target>(?:<[^>]+>)|(?:\[(?:\s*<[^>]+>\s*)+]))",
+            RegexOptions.Singleline | RegexOptions.Compiled))
             {
                 var start = int.Parse(entry.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
                 var end = int.Parse(entry.Groups[2].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
@@ -644,17 +699,15 @@ public class PdfFontSubsetMergerTests
 
                 if (target.StartsWith("[", StringComparison.Ordinal))
                 {
-                    foreach (Match targetMatch in Regex.Matches(target, @"<([0-9A-Fa-f]+)>", RegexOptions.Singleline))
-                    {
-                        result.Add(DecodeHexToString(targetMatch.Groups[1].Value));
-                    }
-
+                    foreach (Match t in s_hexArray.Matches(target))
+                        result.Add(DecodeHexToString(t.Groups[1].Value));
                     continue;
                 }
 
                 var baseHex = target.Trim('<', '>');
                 var baseValue = int.Parse(baseHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
                 var glyphCount = end - start + 1;
+
 
                 for (var offset = 0; offset < glyphCount; offset++)
                 {
@@ -667,6 +720,7 @@ public class PdfFontSubsetMergerTests
 
         return result;
     }
+
 
     private static string DecodeHexToString(string hex)
     {
@@ -689,6 +743,10 @@ public class PdfFontSubsetMergerTests
         return Encoding.BigEndianUnicode.GetString(bytes);
     }
 
+    /// <summary>
+    /// Packs the PDF object number and generation into a stable 64‑bit key:
+    /// (obj << 32) | gen. Useful for de‑duplicating font objects across pages.
+    /// </summary>
     private static long GetReferenceKey(PdfIndirectReference reference)
     {
         return ((long)reference.GetObjNumber() << 32) | (uint)reference.GetGenNumber();
@@ -706,7 +764,7 @@ public class PdfFontSubsetMergerTests
         return matches.Select(match => match.Groups[1].Value).ToList();
     }
 
-    private static string ExtractedText(PdfPage page)
+    private static string ExtractText(PdfPage page)
     {
         var text = PdfTextExtractor.GetTextFromPage(page);
         return text.Replace("\n", string.Empty, StringComparison.Ordinal);
@@ -714,20 +772,12 @@ public class PdfFontSubsetMergerTests
 
     private static string GetFontPath()
     {
-        var environmentOverride = Environment.GetEnvironmentVariable("PDF_TEST_FONT_PATH");
-        if (!string.IsNullOrWhiteSpace(environmentOverride) && File.Exists(environmentOverride))
-        {
-            return environmentOverride;
-        }
-
         var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "calibri.ttf",
-            "arial.ttf",
             "LiberationSans-Regular.ttf",
             "LiberationSans.ttf",
             "DejaVuSans.ttf",
-            "DejaVuSansCondensed.ttf",
             "FreeSans.ttf"
         };
 
@@ -741,7 +791,7 @@ public class PdfFontSubsetMergerTests
 
             foreach (var file in EnumerateFontFiles(directory))
             {
-                var fileName = System.IO.Path.GetFileName(file);
+                var fileName = Path.GetFileName(file);
                 if (fileName != null && candidates.Contains(fileName))
                 {
                     return file;
@@ -753,9 +803,17 @@ public class PdfFontSubsetMergerTests
             $"Test font not found. Looked for {string.Join(", ", candidates)} in {string.Join(", ", searchRoots)}.");
     }
 
+    /// <summary>
+    /// In subset‑PDF generation, we draw "additionalGlyphsText" **off‑page** (y = -100)
+    /// to ensure those glyphs are included in the subset without affecting visible text.
+    /// </summary>
+    /// <summary>
+    /// Creates a PDF with font subsetting. The additionalGlyphsText is rendered off-page (y = -100)
+    /// to include those glyphs in the subset without affecting visible content.
+    /// </summary>
     private static string CreateSubsetPdfFile(string visibleText, string additionalGlyphsText, string fontPath)
     {
-        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".pdf");
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".pdf");
 
         using (var writer = new PdfWriter(path))
         using (var pdf = new PdfDocument(writer))
@@ -791,21 +849,16 @@ public class PdfFontSubsetMergerTests
 
     private static void TryDelete(string path)
     {
-        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        try
         {
-            File.Delete(path);
+            if (!string.IsNullOrEmpty(path) && File.Exists(path)) File.Delete(path);
         }
+        catch { /* ignore test cleanup failures */ }
     }
 
-    private static IEnumerable<string> GetFontDirectories()
+    private static IReadOnlyCollection<string> GetFontDirectories()
     {
         var result = new List<string>();
-
-        var environmentDirectory = Environment.GetEnvironmentVariable("PDF_TEST_FONT_DIR");
-        if (!string.IsNullOrWhiteSpace(environmentDirectory))
-        {
-            result.Add(environmentDirectory);
-        }
 
         var specialFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
         if (!string.IsNullOrWhiteSpace(specialFolder))
@@ -818,32 +871,30 @@ public class PdfFontSubsetMergerTests
             var windowsDirectory = Environment.GetEnvironmentVariable("WINDIR");
             if (!string.IsNullOrEmpty(windowsDirectory))
             {
-                result.Add(System.IO.Path.Combine(windowsDirectory, "Fonts"));
+                result.Add(Path.Combine(windowsDirectory, "Fonts"));
             }
         }
         else if (OperatingSystem.IsMacOS())
         {
             result.Add("/System/Library/Fonts");
             result.Add("/Library/Fonts");
-            var userLibrary = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.Personal),
-                "Library",
-                "Fonts");
+            var userLibrary = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Fonts");
             result.Add(userLibrary);
         }
         else if (OperatingSystem.IsLinux())
         {
             result.Add("/usr/share/fonts");
             result.Add("/usr/local/share/fonts");
-            result.Add(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".fonts"));
-            result.Add(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "share", "fonts"));
+            result.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".fonts"));
+            result.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "share", "fonts"));
         }
 
         return result
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(ExpandHomeDirectory)
-            .Select(path => System.IO.Path.GetFullPath(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+            .Select(path => Path.GetFullPath(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static IEnumerable<string> EnumerateFontFiles(string root)
@@ -916,9 +967,9 @@ public class PdfFontSubsetMergerTests
             return path;
         }
 
-        return System.IO.Path.Combine(
+        return Path.Combine(
             home,
-            path.Substring(1).TrimStart(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+            path.Substring(1).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
     }
 }
 
@@ -943,23 +994,23 @@ public sealed class TestPdfLogger : IPdfCropLogger
         events.Add(new LogEvent(ParseId(message), level, message));
     }
 
+    /// <summary>
+    /// Extracts a <see cref="FontMergeLogEventId"/> from a logger line in the format
+    /// "[FontSubsetMerge][<EventId>] ...". Returns null when the prefix/closing bracket
+    /// is missing or when the value cannot be parsed. This keeps tests tolerant to
+    /// surrounding wording changes while still asserting the intended event ID.
+    /// </summary>
     private static FontMergeLogEventId? ParseId(string message)
     {
-        var prefix = "[FontSubsetMerge][";
-        var start = message.IndexOf(prefix, StringComparison.Ordinal);
-        if (start < 0)
-        {
-            return null;
-        }
+        const string Prefix = "[FontSubsetMerge][";
+        var start = message.IndexOf(Prefix, StringComparison.Ordinal);
+        if (start < 0) return null;
 
-        start += prefix.Length;
+        start += Prefix.Length;
         var end = message.IndexOf(']', start);
-        if (end < 0)
-        {
-            return null;
-        }
+        if (end < 0) return null;
 
-        var span = message[start..end];
+        var span = message.AsSpan(start, end - start);
         return Enum.TryParse<FontMergeLogEventId>(span, out var id) ? id : null;
     }
 
