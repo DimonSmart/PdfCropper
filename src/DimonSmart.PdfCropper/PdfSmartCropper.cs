@@ -7,6 +7,8 @@ using iText.Kernel.Exceptions;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Utils;
+using DimonSmart.PdfCropper.PdfFontSubsetMerger;
+using FontSubsetMerger = DimonSmart.PdfCropper.PdfFontSubsetMerger.PdfFontSubsetMerger;
 
 namespace DimonSmart.PdfCropper;
 
@@ -190,6 +192,7 @@ public static class PdfSmartCropper
         logger.LogInfo($"  Full compression: {optimizationSettings.EnableFullCompression}");
         logger.LogInfo($"  Smart mode: {optimizationSettings.EnableSmartMode}");
         logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
+        logger.LogInfo($"  Merge duplicate font subsets: {optimizationSettings.MergeDuplicateFontSubsets}");
     }
 
     private static async Task<byte[]> ProcessSingleDocumentAsync(
@@ -208,7 +211,7 @@ public static class PdfSmartCropper
         using var pdfDocument = new PdfDocument(reader, writer);
 
         await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, progress, ct).ConfigureAwait(false);
-        ApplyFinalOptimizations(pdfDocument, optimizationSettings);
+        ApplyFinalOptimizations(pdfDocument, optimizationSettings, logger);
         pdfDocument.Close();
 
         return outputStream.ToArray();
@@ -254,7 +257,7 @@ public static class PdfSmartCropper
             await Task.Yield();
         }
 
-        ApplyFinalOptimizations(outputDocument, optimizationSettings);
+        ApplyFinalOptimizations(outputDocument, optimizationSettings, logger);
         outputDocument.Close();
 
         return outputStream.ToArray();
@@ -454,8 +457,16 @@ public static class PdfSmartCropper
         }
     }
 
-    private static void ApplyFinalOptimizations(PdfDocument pdfDocument, PdfOptimizationSettings optimizationSettings)
+    private static void ApplyFinalOptimizations(
+        PdfDocument pdfDocument,
+        PdfOptimizationSettings optimizationSettings,
+        IPdfCropLogger logger)
     {
+        if (optimizationSettings.MergeDuplicateFontSubsets)
+        {
+            FontSubsetMerger.MergeDuplicateSubsets(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger);
+        }
+
         PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
 
         if (optimizationSettings.RemoveEmbeddedStandardFonts)
