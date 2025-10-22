@@ -772,35 +772,13 @@ Examples (each token is a separate match):
 
     private static string GetFontPath()
     {
-        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var fontPath = Path.Combine(AppContext.BaseDirectory, "Fonts", "Lato-Regular.ttf");
+        if (File.Exists(fontPath))
         {
-            "calibri.ttf",
-            "LiberationSans-Regular.ttf",
-            "LiberationSans.ttf",
-            "DejaVuSans.ttf",
-            "FreeSans.ttf"
-        };
-
-        var searchRoots = GetFontDirectories().ToList();
-        foreach (var directory in searchRoots)
-        {
-            if (!Directory.Exists(directory))
-            {
-                continue;
-            }
-
-            foreach (var file in EnumerateFontFiles(directory))
-            {
-                var fileName = Path.GetFileName(file);
-                if (fileName != null && candidates.Contains(fileName))
-                {
-                    return file;
-                }
-            }
+            return fontPath;
         }
 
-        throw new FileNotFoundException(
-            $"Test font not found. Looked for {string.Join(", ", candidates)} in {string.Join(", ", searchRoots)}.");
+        throw new FileNotFoundException("Test font not found. Expected Lato-Regular.ttf in the test output directory.", fontPath);
     }
 
     /// <summary>
@@ -856,121 +834,6 @@ Examples (each token is a separate match):
         catch { /* ignore test cleanup failures */ }
     }
 
-    private static IReadOnlyCollection<string> GetFontDirectories()
-    {
-        var result = new List<string>();
-
-        var specialFolder = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
-        if (!string.IsNullOrWhiteSpace(specialFolder))
-        {
-            result.Add(specialFolder);
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            var windowsDirectory = Environment.GetEnvironmentVariable("WINDIR");
-            if (!string.IsNullOrEmpty(windowsDirectory))
-            {
-                result.Add(Path.Combine(windowsDirectory, "Fonts"));
-            }
-        }
-        else if (OperatingSystem.IsMacOS())
-        {
-            result.Add("/System/Library/Fonts");
-            result.Add("/Library/Fonts");
-            var userLibrary = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Fonts");
-            result.Add(userLibrary);
-        }
-        else if (OperatingSystem.IsLinux())
-        {
-            result.Add("/usr/share/fonts");
-            result.Add("/usr/local/share/fonts");
-            result.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".fonts"));
-            result.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "share", "fonts"));
-        }
-
-        return result
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(ExpandHomeDirectory)
-            .Select(path => Path.GetFullPath(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static IEnumerable<string> EnumerateFontFiles(string root)
-    {
-        var pending = new Stack<string>();
-        pending.Push(root);
-
-        while (pending.Count > 0)
-        {
-            var current = pending.Pop();
-
-            string[] files;
-            try
-            {
-                files = Directory.GetFiles(current, "*.ttf", SearchOption.TopDirectoryOnly);
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            foreach (var file in files)
-            {
-                yield return file;
-            }
-
-            string[] subdirectories;
-            try
-            {
-                subdirectories = Directory.GetDirectories(current);
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            foreach (var directory in subdirectories)
-            {
-                pending.Push(directory);
-            }
-        }
-    }
-
-    private static string ExpandHomeDirectory(string path)
-    {
-        if (string.IsNullOrEmpty(path) || path[0] != '~')
-        {
-            return path;
-        }
-
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
-        if (string.IsNullOrEmpty(home))
-        {
-            return path;
-        }
-
-        return Path.Combine(
-            home,
-            path.Substring(1).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-    }
 }
 
 public sealed class TestPdfLogger : IPdfCropLogger
