@@ -24,14 +24,12 @@ public static class PdfSmartCropper
     /// <param name="inputPdf">The input PDF as a byte array.</param>
     /// <param name="settings">Cropping settings to apply.</param>
     /// <param name="logger">Optional logger for cropping operations.</param>
-    /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
     public static async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings settings,
         IPdfCropLogger? logger = null,
-        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
         if (inputPdf is null)
@@ -39,7 +37,7 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return await ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, progress, ct, "PDF processing")
+        return await ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, ct, "PDF processing")
             .ConfigureAwait(false);
     }
 
@@ -50,7 +48,6 @@ public static class PdfSmartCropper
     /// <param name="cropSettings">Cropping settings to apply to each document.</param>
     /// <param name="optimizationSettings">Optimization settings that control PDF serialization.</param>
     /// <param name="logger">Optional logger for cropping operations.</param>
-    /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The merged cropped PDF as a byte array.</returns>
     public static async Task<byte[]> CropAndMergeAsync(
@@ -58,12 +55,11 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
-        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
         var inputList = inputs.ToList();
 
-        return await ProcessAsync(inputList, cropSettings, optimizationSettings, logger, progress, ct, "PDF merging")
+        return await ProcessAsync(inputList, cropSettings, optimizationSettings, logger, ct, "PDF merging")
             .ConfigureAwait(false);
     }
 
@@ -74,7 +70,6 @@ public static class PdfSmartCropper
     /// <param name="cropSettings">Cropping settings to apply.</param>
     /// <param name="optimizationSettings">Optimization settings that control PDF serialization.</param>
     /// <param name="logger">Optional logger for cropping operations.</param>
-    /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
     public static async Task<byte[]> CropAsync(
@@ -82,7 +77,6 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger = null,
-        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
         if (inputPdf is null)
@@ -90,7 +84,7 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return await ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, progress, ct, "PDF processing")
+        return await ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, ct, "PDF processing")
             .ConfigureAwait(false);
     }
 
@@ -99,7 +93,6 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger? logger,
-        IProgress<string>? progress,
         CancellationToken ct,
         string operationDescription)
     {
@@ -111,7 +104,7 @@ public static class PdfSmartCropper
         logger ??= NullLogger.Instance;
         await LogOptimizationSettingsAsync(logger, optimizationSettings, operationDescription).ConfigureAwait(false);
 
-        return await ExecuteAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct).ConfigureAwait(false);
+        return await ExecuteAsync(inputs, cropSettings, optimizationSettings, logger, ct).ConfigureAwait(false);
     }
 
     private static async Task<byte[]> ExecuteAsync(
@@ -119,7 +112,6 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger,
-        IProgress<string>? progress,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -132,24 +124,21 @@ public static class PdfSmartCropper
             ? $"Input PDF size: {inputs[0].Length:N0} bytes"
             : $"Starting PDF merging for {inputs.Count} document(s)";
         await logger.LogInfoAsync(message).ConfigureAwait(false);
-        progress?.Report(message);
         await Task.Yield();
 
         try
         {
             var resultBytes = inputs.Count == 1
-                ? await ProcessSingleDocumentAsync(inputs[0], cropSettings, optimizationSettings, logger, progress, ct).ConfigureAwait(false)
-                : await ProcessMultipleDocumentsAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct).ConfigureAwait(false);
+                ? await ProcessSingleDocumentAsync(inputs[0], cropSettings, optimizationSettings, logger, ct).ConfigureAwait(false)
+                : await ProcessMultipleDocumentsAsync(inputs, cropSettings, optimizationSettings, logger, ct).ConfigureAwait(false);
 
             totalStopwatch.Stop();
             var completionMessage = $"{operationName} completed successfully";
             await logger.LogInfoAsync(completionMessage).ConfigureAwait(false);
-            progress?.Report(completionMessage);
             await Task.Yield();
             
             var timeMessage = $"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}";
             await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
-            progress?.Report(timeMessage);
             await Task.Yield();
 
             var finalResult = await ApplyXmpOptimizationsAsync(resultBytes, optimizationSettings, logger).ConfigureAwait(false);
@@ -206,7 +195,6 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger,
-        IProgress<string>? progress,
         CancellationToken ct)
     {
         using var inputStream = new MemoryStream(inputPdf, writable: false);
@@ -216,7 +204,7 @@ public static class PdfSmartCropper
         using var writer = CreatePdfWriter(outputStream, optimizationSettings);
         using var pdfDocument = new PdfDocument(reader, writer);
 
-        await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, progress, ct).ConfigureAwait(false);
+        await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
         ApplyFinalOptimizations(pdfDocument, optimizationSettings, logger);
         pdfDocument.Close();
 
@@ -228,7 +216,6 @@ public static class PdfSmartCropper
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger,
-        IProgress<string>? progress,
         CancellationToken ct)
     {
         using var outputStream = new MemoryStream();
@@ -245,10 +232,9 @@ public static class PdfSmartCropper
             
             var docMessage = $"Processing document {documentIndex}/{inputs.Count}";
             await logger.LogInfoAsync(docMessage).ConfigureAwait(false);
-            progress?.Report(docMessage);
             await Task.Yield();
             
-            var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, progress, ct).ConfigureAwait(false);
+            var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, ct).ConfigureAwait(false);
             
             using var croppedStream = new MemoryStream(croppedBytes, writable: false);
             using var reader = new PdfReader(croppedStream, new ReaderProperties());
@@ -274,7 +260,6 @@ public static class PdfSmartCropper
         byte[] inputPdf,
         CropSettings cropSettings,
         IPdfCropLogger logger,
-        IProgress<string>? progress,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -290,7 +275,7 @@ public static class PdfSmartCropper
 
         using var pdfDocument = new PdfDocument(reader, writer);
 
-        await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, progress, ct).ConfigureAwait(false);
+        await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
         pdfDocument.Close();
 
         return outputStream.ToArray();
@@ -301,13 +286,11 @@ public static class PdfSmartCropper
         byte[] inputPdf,
         CropSettings cropSettings,
         IPdfCropLogger logger,
-        IProgress<string>? progress,
         CancellationToken ct)
     {
         var pageCount = pdfDocument.GetNumberOfPages();
         var startMessage = $"Processing PDF with {pageCount} page(s) using {cropSettings.Method} method";
         await logger.LogInfoAsync(startMessage).ConfigureAwait(false);
-        progress?.Report(startMessage);
         await Task.Yield();
 
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
@@ -336,11 +319,7 @@ public static class PdfSmartCropper
             var sizeMessage = $"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts";
             await logger.LogInfoAsync(sizeMessage).ConfigureAwait(false);
             
-            if (pageIndex % 5 == 1 || pageCount <= 10)
-            {
-                progress?.Report(sizeMessage);
-                await Task.Yield();
-            }
+            await Task.Yield();
 
             if (IsPageEmpty(page, ct))
             {
@@ -383,7 +362,6 @@ public static class PdfSmartCropper
                 var analyzedPages = repeatedDetectionAnalyses!.Count(static analysis => analysis != null);
                 var detectionMessage = $"Identified {detected.Count} repeated content object(s) across {analyzedPages} analyzed page(s)";
                 await logger.LogInfoAsync(detectionMessage).ConfigureAwait(false);
-                progress?.Report(detectionMessage);
                 await Task.Yield();
             }
         }
@@ -457,12 +435,6 @@ public static class PdfSmartCropper
             var totalDuration = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
             var timeMessage = $"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}";
             await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
-            
-            if (pageIndex % 5 == 0 || pageIndex == pageCount || pageCount <= 10)
-            {
-                progress?.Report($"Completed page {pageIndex}/{pageCount}");
-                await Task.Yield();
-            }
             
             await Task.Yield();
         }
