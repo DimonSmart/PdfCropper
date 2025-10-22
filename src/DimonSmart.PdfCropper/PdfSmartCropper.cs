@@ -27,7 +27,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAsync(
+    public static async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings settings,
         IPdfCropLogger? logger = null,
@@ -39,7 +39,8 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, progress, ct, "PDF processing");
+        return await ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, progress, ct, "PDF processing")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -52,7 +53,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The merged cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAndMergeAsync(
+    public static async Task<byte[]> CropAndMergeAsync(
         IEnumerable<byte[]> inputs,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -62,7 +63,8 @@ public static class PdfSmartCropper
     {
         var inputList = inputs.ToList();
 
-        return ProcessAsync(inputList, cropSettings, optimizationSettings, logger, progress, ct, "PDF merging");
+        return await ProcessAsync(inputList, cropSettings, optimizationSettings, logger, progress, ct, "PDF merging")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -75,7 +77,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAsync(
+    public static async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -88,7 +90,8 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, progress, ct, "PDF processing");
+        return await ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, progress, ct, "PDF processing")
+            .ConfigureAwait(false);
     }
 
     private static async Task<byte[]> ProcessAsync(

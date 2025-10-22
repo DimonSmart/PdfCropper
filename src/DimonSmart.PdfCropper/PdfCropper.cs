@@ -8,7 +8,7 @@ namespace DimonSmart.PdfCropper;
 public sealed class PdfCropper : IPdfCropper
 {
     /// <inheritdoc />
-    public Task<byte[]> CropAsync(
+    public async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -16,11 +16,13 @@ public sealed class PdfCropper : IPdfCropper
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        return PdfSmartCropper.CropAsync(inputPdf, cropSettings, optimizationSettings, logger, progress, ct);
+        return await PdfSmartCropper
+            .CropAsync(inputPdf, cropSettings, optimizationSettings, logger, progress, ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public Task<byte[]> CropAndMergeAsync(
+    public async Task<byte[]> CropAndMergeAsync(
         IEnumerable<byte[]> inputs,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -28,6 +30,8 @@ public sealed class PdfCropper : IPdfCropper
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        return PdfSmartCropper.CropAndMergeAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct);
+        return await PdfSmartCropper
+            .CropAndMergeAsync(inputs, cropSettings, optimizationSettings, logger, progress, ct)
+            .ConfigureAwait(false);
     }
 }
