@@ -21,6 +21,7 @@ public sealed class PdfOptimizationSettings
     /// <param name="documentInfoKeysToRemove">Specific document info keys to remove when not clearing the dictionary.</param>
     /// <param name="removeEmbeddedStandardFonts">Removes embedded font streams for the 14 standard fonts when set.</param>
     /// <param name="targetPdfVersion">Sets the compatibility level for the resulting PDF when specified.</param>
+    /// <param name="mergeDuplicateFontSubsets">Merges duplicate font subset resources before applying other optimizations when set.</param>
     public PdfOptimizationSettings(
         int? compressionLevel = null,
         bool enableFullCompression = false,
@@ -30,7 +31,8 @@ public sealed class PdfOptimizationSettings
         bool clearDocumentInfo = false,
         IEnumerable<string>? documentInfoKeysToRemove = null,
         bool removeEmbeddedStandardFonts = false,
-        PdfCompatibilityLevel? targetPdfVersion = null)
+        PdfCompatibilityLevel? targetPdfVersion = null,
+        bool mergeDuplicateFontSubsets = false)
     {
         CompressionLevel = compressionLevel;
         EnableFullCompression = enableFullCompression;
@@ -40,6 +42,7 @@ public sealed class PdfOptimizationSettings
         ClearDocumentInfo = clearDocumentInfo;
         RemoveEmbeddedStandardFonts = removeEmbeddedStandardFonts;
         TargetPdfVersion = targetPdfVersion;
+        MergeDuplicateFontSubsets = mergeDuplicateFontSubsets;
 
         if (clearDocumentInfo || documentInfoKeysToRemove is null)
         {
@@ -109,6 +112,11 @@ public sealed class PdfOptimizationSettings
     /// Gets the desired compatibility level for the output PDF or <c>null</c> to keep the original version.
     /// </summary>
     public PdfCompatibilityLevel? TargetPdfVersion { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether duplicate font subset resources should be merged before applying other optimizations.
+    /// </summary>
+    public bool MergeDuplicateFontSubsets { get; }
 
     /// <summary>
     /// Gets default optimization settings that keep the original document layout.

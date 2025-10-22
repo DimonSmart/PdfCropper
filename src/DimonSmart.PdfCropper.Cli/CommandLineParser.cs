@@ -7,36 +7,14 @@ using DimonSmart.PdfCropper;
 
 namespace DimonSmart.PdfCropper.Cli;
 
-internal sealed class CommandLineOptions
-{
-    public CommandLineOptions(
-        string inputPath,
-        string outputPath,
-        CropSettings cropSettings,
-        PdfOptimizationSettings optimizationSettings,
-        LogLevel logLevel,
-        bool mergeIntoSingleOutput)
-    {
-        InputPath = inputPath;
-        OutputPath = outputPath;
-        CropSettings = cropSettings;
-        OptimizationSettings = optimizationSettings;
-        LogLevel = logLevel;
-        MergeIntoSingleOutput = mergeIntoSingleOutput;
-    }
-
-    public string InputPath { get; }
-
-    public string OutputPath { get; }
-
-    public CropSettings CropSettings { get; }
-
-    public PdfOptimizationSettings OptimizationSettings { get; }
-
-    public LogLevel LogLevel { get; }
-
-    public bool MergeIntoSingleOutput { get; }
-}
+internal sealed record CommandLineOptions(
+    string InputPath,
+    string OutputPath,
+    CropSettings CropSettings,
+    PdfOptimizationSettings OptimizationSettings,
+    LogLevel LogLevel,
+    bool MergeIntoSingleOutput,
+    bool MergeFontSubsets);
 
 internal sealed class CommandLineParseResult
 {
@@ -102,6 +80,7 @@ internal static class CommandLineParser
         var logLevel = LogLevel.None;
         PdfCompatibilityLevel? targetPdfVersion = null;
         var mergeIntoSingleOutput = false;
+        var mergeFontSubsets = false;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -225,6 +204,7 @@ internal static class CommandLineParser
                     clearDocumentInfo = presetOptimization.ClearDocumentInfo;
                     removeEmbeddedStandardFonts = presetOptimization.RemoveEmbeddedStandardFonts;
                     targetPdfVersion = presetOptimization.TargetPdfVersion;
+                    mergeFontSubsets = presetOptimization.MergeDuplicateFontSubsets;
 
                     infoKeys.Clear();
                     if (!clearDocumentInfo)
@@ -309,6 +289,10 @@ internal static class CommandLineParser
                     removeEmbeddedStandardFonts = true;
                     break;
 
+                case "--merge-font-subsets":
+                    mergeFontSubsets = true;
+                    break;
+
                 case "--merge":
                     mergeIntoSingleOutput = true;
                     break;
@@ -348,9 +332,17 @@ internal static class CommandLineParser
             clearDocumentInfo,
             clearDocumentInfo ? null : infoKeys,
             removeEmbeddedStandardFonts,
-            targetPdfVersion);
+            targetPdfVersion,
+            mergeDuplicateFontSubsets: mergeFontSubsets);
 
-        var options = new CommandLineOptions(inputPath, outputPath, cropSettings, optimizationSettings, logLevel, mergeIntoSingleOutput);
+        var options = new CommandLineOptions(
+            inputPath,
+            outputPath,
+            cropSettings,
+            optimizationSettings,
+            logLevel,
+            mergeIntoSingleOutput,
+            mergeFontSubsets);
         return CommandLineParseResult.Ok(options);
     }
 

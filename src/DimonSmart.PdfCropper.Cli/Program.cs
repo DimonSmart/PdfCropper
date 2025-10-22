@@ -167,6 +167,7 @@ static void ShowUsage()
     Console.WriteLine("  --clear-info          Remove legacy document info dictionary");
     Console.WriteLine("  --remove-info-key <k> Remove specific document info key (repeatable)");
     Console.WriteLine("  --remove-standard-fonts  Remove embedded files for standard PDF fonts");
+    Console.WriteLine("  --merge-font-subsets  Merge duplicate font subset resources before other optimizations");
     Console.WriteLine("  --merge              Merge all inputs into a single output PDF");
     Console.WriteLine("                        Output must be a file path without wildcards");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
