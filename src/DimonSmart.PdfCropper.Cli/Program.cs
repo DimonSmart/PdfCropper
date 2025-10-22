@@ -213,7 +213,7 @@ static async Task<int> CropFileAsync(
             logger.LogInfo("Edge-touching content will be ignored during bounds detection");
         }
 
-        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, cropSettings, optimizationSettings, logger, progress: null);
+        var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, cropSettings, optimizationSettings, logger);
 
         var targetDirectory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(targetDirectory))
@@ -268,7 +268,7 @@ static async Task<int> MergeFilesAsync(
             logger.LogInfo("Edge-touching content will be ignored during bounds detection");
         }
 
-        var mergedBytes = await PdfSmartCropper.CropAndMergeAsync(inputBytes, cropSettings, optimizationSettings, logger, progress: null);
+        var mergedBytes = await PdfSmartCropper.CropAndMergeAsync(inputBytes, cropSettings, optimizationSettings, logger);
 
         var targetDirectory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrEmpty(targetDirectory))

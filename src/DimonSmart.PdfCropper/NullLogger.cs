@@ -11,15 +11,18 @@ internal sealed class NullLogger : IPdfCropLogger
     {
     }
 
-    public void LogInfo(string message)
+    public Task LogInfoAsync(string message)
     {
+        return Task.CompletedTask;
     }
 
-    public void LogWarning(string message)
+    public Task LogWarningAsync(string message)
     {
+        return Task.CompletedTask;
     }
 
-    public void LogError(string message)
+    public Task LogErrorAsync(string message)
     {
+        return Task.CompletedTask;
     }
 }
