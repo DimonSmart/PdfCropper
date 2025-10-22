@@ -7,6 +7,8 @@ using iText.Kernel.Exceptions;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Utils;
+using DimonSmart.PdfCropper.PdfFontSubsetMerger;
+using FontSubsetMerger = DimonSmart.PdfCropper.PdfFontSubsetMerger.PdfFontSubsetMerger;
 
 namespace DimonSmart.PdfCropper;
 
@@ -25,7 +27,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAsync(
+    public static async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings settings,
         IPdfCropLogger? logger = null,
@@ -37,7 +39,8 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, progress, ct, "PDF processing");
+        return await ProcessAsync(new[] { inputPdf }, settings, PdfOptimizationSettings.Default, logger, progress, ct, "PDF processing")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -50,7 +53,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The merged cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAndMergeAsync(
+    public static async Task<byte[]> CropAndMergeAsync(
         IEnumerable<byte[]> inputs,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -60,7 +63,8 @@ public static class PdfSmartCropper
     {
         var inputList = inputs.ToList();
 
-        return ProcessAsync(inputList, cropSettings, optimizationSettings, logger, progress, ct, "PDF merging");
+        return await ProcessAsync(inputList, cropSettings, optimizationSettings, logger, progress, ct, "PDF merging")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -73,7 +77,7 @@ public static class PdfSmartCropper
     /// <param name="progress">Optional progress reporter for real-time updates.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The cropped PDF as a byte array.</returns>
-    public static Task<byte[]> CropAsync(
+    public static async Task<byte[]> CropAsync(
         byte[] inputPdf,
         CropSettings cropSettings,
         PdfOptimizationSettings optimizationSettings,
@@ -86,7 +90,8 @@ public static class PdfSmartCropper
             throw new ArgumentNullException(nameof(inputPdf));
         }
 
-        return ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, progress, ct, "PDF processing");
+        return await ProcessAsync(new[] { inputPdf }, cropSettings, optimizationSettings, logger, progress, ct, "PDF processing")
+            .ConfigureAwait(false);
     }
 
     private static async Task<byte[]> ProcessAsync(
@@ -193,6 +198,7 @@ public static class PdfSmartCropper
         logger.LogInfo($"  Full compression: {optimizationSettings.EnableFullCompression}");
         logger.LogInfo($"  Smart mode: {optimizationSettings.EnableSmartMode}");
         logger.LogInfo($"  Remove unused objects: {optimizationSettings.RemoveUnusedObjects}");
+        logger.LogInfo($"  Merge duplicate font subsets: {optimizationSettings.MergeDuplicateFontSubsets}");
     }
 
     private static async Task<byte[]> ProcessSingleDocumentAsync(
@@ -211,7 +217,7 @@ public static class PdfSmartCropper
         using var pdfDocument = new PdfDocument(reader, writer);
 
         await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, progress, ct).ConfigureAwait(false);
-        ApplyFinalOptimizations(pdfDocument, optimizationSettings);
+        ApplyFinalOptimizations(pdfDocument, optimizationSettings, logger);
         pdfDocument.Close();
 
         return outputStream.ToArray();
@@ -258,7 +264,7 @@ public static class PdfSmartCropper
             await Task.Yield();
         }
 
-        ApplyFinalOptimizations(outputDocument, optimizationSettings);
+        ApplyFinalOptimizations(outputDocument, optimizationSettings, logger);
         outputDocument.Close();
 
         return outputStream.ToArray();
@@ -462,8 +468,16 @@ public static class PdfSmartCropper
         }
     }
 
-    private static void ApplyFinalOptimizations(PdfDocument pdfDocument, PdfOptimizationSettings optimizationSettings)
+    private static void ApplyFinalOptimizations(
+        PdfDocument pdfDocument,
+        PdfOptimizationSettings optimizationSettings,
+        IPdfCropLogger logger)
     {
+        if (optimizationSettings.MergeDuplicateFontSubsets)
+        {
+            FontSubsetMerger.MergeDuplicateSubsets(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger);
+        }
+
         PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
 
         if (optimizationSettings.RemoveEmbeddedStandardFonts)
