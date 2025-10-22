@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\DimonSmart.PdfCropper\DimonSmart.PdfCropper.csproj" />
     <ProjectReference Include="..\..\src\DimonSmart.PdfCropper.Cli\DimonSmart.PdfCropper.Cli.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\DimonSmart.PdfCropper.Cli\Fonts\Lato-Regular.ttf">
+      <Link>Fonts\Lato-Regular.ttf</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
