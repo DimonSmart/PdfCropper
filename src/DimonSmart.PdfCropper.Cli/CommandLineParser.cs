@@ -7,40 +7,14 @@ using DimonSmart.PdfCropper;
 
 namespace DimonSmart.PdfCropper.Cli;
 
-internal sealed class CommandLineOptions
-{
-    public CommandLineOptions(
-        string inputPath,
-        string outputPath,
-        CropSettings cropSettings,
-        PdfOptimizationSettings optimizationSettings,
-        LogLevel logLevel,
-        bool mergeIntoSingleOutput,
-        bool mergeFontSubsets)
-    {
-        InputPath = inputPath;
-        OutputPath = outputPath;
-        CropSettings = cropSettings;
-        OptimizationSettings = optimizationSettings;
-        LogLevel = logLevel;
-        MergeIntoSingleOutput = mergeIntoSingleOutput;
-        MergeFontSubsets = mergeFontSubsets;
-    }
-
-    public string InputPath { get; }
-
-    public string OutputPath { get; }
-
-    public CropSettings CropSettings { get; }
-
-    public PdfOptimizationSettings OptimizationSettings { get; }
-
-    public LogLevel LogLevel { get; }
-
-    public bool MergeIntoSingleOutput { get; }
-
-    public bool MergeFontSubsets { get; }
-}
+internal sealed record CommandLineOptions(
+    string InputPath,
+    string OutputPath,
+    CropSettings CropSettings,
+    PdfOptimizationSettings OptimizationSettings,
+    LogLevel LogLevel,
+    bool MergeIntoSingleOutput,
+    bool MergeFontSubsets);
 
 internal sealed class CommandLineParseResult
 {
