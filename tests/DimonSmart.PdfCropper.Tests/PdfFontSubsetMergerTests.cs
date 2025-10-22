@@ -16,6 +16,7 @@ using iText.Kernel.Pdf.Xobject;
 using iText.Kernel.Utils;
 using iText.Kernel.Font;
 using Xunit;
+using Xunit.Abstractions;
 
 using FontSubsetMerger = DimonSmart.PdfCropper.PdfFontSubsetMerger.PdfFontSubsetMerger;
 
@@ -23,11 +24,49 @@ namespace DimonSmart.PdfCropper.Tests;
 
 public class PdfFontSubsetMergerTests
 {
+    private readonly ITestOutputHelper output;
     private const string Type0PageText = "Type0 sample";
     private const string Type0FormText = "Type0 sample";
     private const string TrueTypeLineOne = "TrueType sample";
     private const string TrueTypeLineTwo = "TrueType sample";
-    private static readonly string[] ExpectedSubsetCharacters = { "1", "2", "3", "a", "b", "c" };
+
+    public PdfFontSubsetMergerTests(ITestOutputHelper output)
+    {
+        this.output = output;
+    }
+
+    public static IEnumerable<object[]> MergeDuplicateSubsetsAfterMergingDocumentsData()
+    {
+        yield return new object[]
+        {
+            "Digits and letters",
+            "abc",
+            "123",
+            "123",
+            "abc",
+            new[] { "1", "2", "3", "a", "b", "c" }
+        };
+
+        yield return new object[]
+        {
+            "Repeated upper and lower case letters",
+            "ABCDa",
+            "AaA",
+            "BCDAa",
+            "AAa",
+            new[] { "A", "B", "C", "D", "a" }
+        };
+
+        yield return new object[]
+        {
+            "Digits with repetitions",
+            "112233",
+            string.Empty,
+            "1",
+            "23",
+            new[] { "1", "2", "3" }
+        };
+    }
 
     [Fact]
     public void MergeDuplicateSubsets_Type0Fonts_MergesResourcesAndFormXObjects()
@@ -123,16 +162,40 @@ public class PdfFontSubsetMergerTests
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype && e.Level == TestPdfLogger.WarningLevel);
     }
 
-    [Fact]
-    public void MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects()
+    [Theory]
+    [MemberData(nameof(MergeDuplicateSubsetsAfterMergingDocumentsData))]
+    public void MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects(
+        string scenario,
+        string firstVisibleText,
+        string firstAdditionalGlyphsText,
+        string secondVisibleText,
+        string secondAdditionalGlyphsText,
+        string[] expectedSubsetCharacters)
     {
         var fontPath = GetFontPath();
-        var firstPath = CreateSubsetPdfFile("abc", "123", fontPath);
-        var secondPath = CreateSubsetPdfFile("123", "abc", fontPath);
+        var firstPath = CreateSubsetPdfFile(firstVisibleText, firstAdditionalGlyphsText, fontPath);
+        var secondPath = CreateSubsetPdfFile(secondVisibleText, secondAdditionalGlyphsText, fontPath);
+        var firstDocumentSize = GetFileSize(firstPath);
+        var secondDocumentSize = GetFileSize(secondPath);
+        var expectedOrderedCharacters = expectedSubsetCharacters
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToList();
 
         try
         {
+            WriteScenarioHeader(
+                scenario,
+                firstVisibleText,
+                firstAdditionalGlyphsText,
+                secondVisibleText,
+                secondAdditionalGlyphsText,
+                firstDocumentSize,
+                secondDocumentSize,
+                expectedOrderedCharacters);
+
             var combined = CombineDocuments(firstPath, secondPath);
+            var combinedDocumentSize = combined.LongLength;
+            LogDocumentSize("Combined document before merge", combinedDocumentSize);
 
             using (var beforeMerge = new PdfDocument(new PdfReader(new MemoryStream(combined))))
             {
@@ -141,20 +204,23 @@ public class PdfFontSubsetMergerTests
 
                 var beforeCharacters = CollectFontCharacterMaps(beforeMerge);
                 Assert.Equal(2, beforeCharacters.Count);
-
-                var expectedCharacters = ExpectedSubsetCharacters
-                    .OrderBy(value => value, StringComparer.Ordinal)
-                    .ToList();
+                LogFontCharacters("Before merge", beforeCharacters);
 
                 foreach (var characters in beforeCharacters.Values)
                 {
-                    Assert.Equal(ExpectedSubsetCharacters.Length, characters.Count);
-                    Assert.Equal(expectedCharacters, characters.OrderBy(value => value, StringComparer.Ordinal).ToList());
+                    Assert.Equal(expectedSubsetCharacters.Length, characters.Count);
+                    Assert.Equal(expectedOrderedCharacters, characters.OrderBy(value => value, StringComparer.Ordinal).ToList());
                 }
             }
 
             var logger = new TestPdfLogger();
             var merged = Merge(combined, FontSubsetMergeOptions.CreateDefault(), logger);
+            var mergedDocumentSize = merged.LongLength;
+            LogDocumentSize("Combined document after merge", mergedDocumentSize);
+            LogSizeReduction(combinedDocumentSize, mergedDocumentSize);
+            Assert.True(
+                mergedDocumentSize < combinedDocumentSize,
+                $"Expected merged document to shrink. Before: {combinedDocumentSize} bytes, after: {mergedDocumentSize} bytes.");
 
             using var afterMerge = new PdfDocument(new PdfReader(new MemoryStream(merged)));
             var mergedFontObjectKeys = CollectFontObjectKeys(afterMerge);
@@ -162,16 +228,116 @@ public class PdfFontSubsetMergerTests
 
             var afterCharacters = CollectFontCharacterMaps(afterMerge);
             Assert.Single(afterCharacters);
+            LogFontCharacters("After merge", afterCharacters);
             var mergedCharacters = afterCharacters.Values.Single();
-            Assert.Equal(ExpectedSubsetCharacters.Length, mergedCharacters.Count);
+            Assert.Equal(expectedSubsetCharacters.Length, mergedCharacters.Count);
             Assert.Equal(
-                ExpectedSubsetCharacters.OrderBy(value => value, StringComparer.Ordinal).ToList(),
+                expectedOrderedCharacters,
                 mergedCharacters.OrderBy(value => value, StringComparer.Ordinal).ToList());
+
+            LogLoggerEvents(logger);
         }
         finally
         {
             TryDelete(firstPath);
             TryDelete(secondPath);
+        }
+    }
+
+    private void WriteScenarioHeader(
+        string scenario,
+        string firstVisibleText,
+        string firstAdditionalGlyphsText,
+        string secondVisibleText,
+        string secondAdditionalGlyphsText,
+        long firstDocumentSize,
+        long secondDocumentSize,
+        IReadOnlyCollection<string> expectedCharacters)
+    {
+        if (output == null)
+        {
+            return;
+        }
+
+        output.WriteLine($"Scenario: {scenario}");
+        output.WriteLine($"  First document visible text: \"{firstVisibleText}\"");
+        output.WriteLine($"  First document additional glyph text: \"{firstAdditionalGlyphsText}\"");
+        output.WriteLine($"  First document size: {firstDocumentSize} bytes");
+        output.WriteLine($"  Second document visible text: \"{secondVisibleText}\"");
+        output.WriteLine($"  Second document additional glyph text: \"{secondAdditionalGlyphsText}\"");
+        output.WriteLine($"  Second document size: {secondDocumentSize} bytes");
+        output.WriteLine($"  Expected characters: {string.Join(", ", expectedCharacters)}");
+    }
+
+    private void LogFontCharacters(string stage, Dictionary<long, HashSet<string>> characters)
+    {
+        if (output == null)
+        {
+            return;
+        }
+
+        output.WriteLine($"{stage} font characters:");
+        if (characters.Count == 0)
+        {
+            output.WriteLine("  <no fonts>");
+            return;
+        }
+
+        foreach (var pair in characters.OrderBy(pair => pair.Key))
+        {
+            var orderedCharacters = pair.Value
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToList();
+            output.WriteLine($"  Font {pair.Key}: {string.Join(", ", orderedCharacters)}");
+        }
+    }
+
+    private void LogDocumentSize(string description, long size)
+    {
+        if (output == null)
+        {
+            return;
+        }
+
+        output.WriteLine($"{description}: {size} bytes");
+    }
+
+    private void LogSizeReduction(long before, long after)
+    {
+        if (output == null)
+        {
+            return;
+        }
+
+        var difference = before - after;
+        if (before <= 0)
+        {
+            output.WriteLine("Size reduction: unavailable (non-positive baseline).");
+            return;
+        }
+
+        var percent = difference * 100d / before;
+        output.WriteLine(
+            $"  Size reduction: {difference} bytes ({percent.ToString("F2", CultureInfo.InvariantCulture)}%)");
+    }
+
+    private void LogLoggerEvents(TestPdfLogger logger)
+    {
+        if (output == null)
+        {
+            return;
+        }
+
+        output.WriteLine("Merge logger events:");
+        if (logger.Events.Count == 0)
+        {
+            output.WriteLine("  <none>");
+            return;
+        }
+
+        foreach (var logEvent in logger.Events)
+        {
+            output.WriteLine($"  [{logEvent.Level}] {logEvent.Message}");
         }
     }
 
@@ -616,6 +782,11 @@ public class PdfFontSubsetMergerTests
         }
 
         return path;
+    }
+
+    private static long GetFileSize(string path)
+    {
+        return new FileInfo(path).Length;
     }
 
     private static void TryDelete(string path)
