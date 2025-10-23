@@ -87,10 +87,10 @@ static async Task<int> RunAsync(string[] args)
             return 2;
         }
 
-        logger.LogInfo("Merging files in the following order:");
+        await logger.LogInfoAsync("Merging files in the following order:").ConfigureAwait(false);
         for (var i = 0; i < inputs.Count; i++)
         {
-            logger.LogInfo($"  {i + 1}. {inputs[i]}");
+            await logger.LogInfoAsync($"  {i + 1}. {inputs[i]}").ConfigureAwait(false);
         }
 
         return await MergeFilesAsync(inputs, Path.GetFullPath(outputPath), cropSettings, optimizationSettings, logger);
@@ -108,7 +108,7 @@ static async Task<int> RunAsync(string[] args)
         var logger = new ConsoleLogger(logLevel);
         foreach (var item in plan.Files)
         {
-            logger.LogInfo($"Processing {item.InputPath} -> {item.OutputPath}");
+            await logger.LogInfoAsync($"Processing {item.InputPath} -> {item.OutputPath}").ConfigureAwait(false);
             if (!File.Exists(item.InputPath))
             {
                 Console.Error.WriteLine($"Error: Input file '{item.InputPath}' was not found.");
@@ -204,13 +204,13 @@ static async Task<int> CropFileAsync(
 {
     try
     {
-        logger.LogInfo($"Reading input file: {inputPath}");
+        await logger.LogInfoAsync($"Reading input file: {inputPath}").ConfigureAwait(false);
         var inputBytes = await File.ReadAllBytesAsync(inputPath);
 
-        logger.LogInfo($"Cropping PDF using {cropSettings.Method} method...");
+        await logger.LogInfoAsync($"Cropping PDF using {cropSettings.Method} method...").ConfigureAwait(false);
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
-            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+            await logger.LogInfoAsync("Edge-touching content will be ignored during bounds detection").ConfigureAwait(false);
         }
 
         var croppedBytes = await PdfSmartCropper.CropAsync(inputBytes, cropSettings, optimizationSettings, logger);
@@ -221,7 +221,7 @@ static async Task<int> CropFileAsync(
             Directory.CreateDirectory(targetDirectory);
         }
 
-        logger.LogInfo($"Writing output file: {outputPath}");
+        await logger.LogInfoAsync($"Writing output file: {outputPath}").ConfigureAwait(false);
         await File.WriteAllBytesAsync(outputPath, croppedBytes);
 
         Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
@@ -229,13 +229,13 @@ static async Task<int> CropFileAsync(
     }
     catch (PdfCropException ex)
     {
-        logger.LogError($"Cropping failed: {ex.Message}");
+        await logger.LogErrorAsync($"Cropping failed: {ex.Message}").ConfigureAwait(false);
         return MapErrorCode(ex.Code);
     }
     catch (Exception ex)
     {
-        logger.LogError($"Unexpected error: {ex.Message}");
-        logger.LogError($"Stack trace: {ex.StackTrace}");
+        await logger.LogErrorAsync($"Unexpected error: {ex.Message}").ConfigureAwait(false);
+        await logger.LogErrorAsync($"Stack trace: {ex.StackTrace}").ConfigureAwait(false);
         return 99;
     }
 }
@@ -258,14 +258,14 @@ static async Task<int> MergeFilesAsync(
                 return 2;
             }
 
-            logger.LogInfo($"Reading input file: {input}");
+            await logger.LogInfoAsync($"Reading input file: {input}").ConfigureAwait(false);
             inputBytes.Add(await File.ReadAllBytesAsync(input));
         }
 
-        logger.LogInfo($"Cropping and merging {inputPaths.Count} document(s) using {cropSettings.Method} method...");
+        await logger.LogInfoAsync($"Cropping and merging {inputPaths.Count} document(s) using {cropSettings.Method} method...").ConfigureAwait(false);
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
-            logger.LogInfo("Edge-touching content will be ignored during bounds detection");
+            await logger.LogInfoAsync("Edge-touching content will be ignored during bounds detection").ConfigureAwait(false);
         }
 
         var mergedBytes = await PdfSmartCropper.CropAndMergeAsync(inputBytes, cropSettings, optimizationSettings, logger);
@@ -276,7 +276,7 @@ static async Task<int> MergeFilesAsync(
             Directory.CreateDirectory(targetDirectory);
         }
 
-        logger.LogInfo($"Writing output file: {outputPath}");
+        await logger.LogInfoAsync($"Writing output file: {outputPath}").ConfigureAwait(false);
         await File.WriteAllBytesAsync(outputPath, mergedBytes);
 
         Console.WriteLine($"Success: PDF cropped and saved to {outputPath}");
@@ -284,13 +284,13 @@ static async Task<int> MergeFilesAsync(
     }
     catch (PdfCropException ex)
     {
-        logger.LogError($"Cropping failed: {ex.Message}");
+        await logger.LogErrorAsync($"Cropping failed: {ex.Message}").ConfigureAwait(false);
         return MapErrorCode(ex.Code);
     }
     catch (Exception ex)
     {
-        logger.LogError($"Unexpected error: {ex.Message}");
-        logger.LogError($"Stack trace: {ex.StackTrace}");
+        await logger.LogErrorAsync($"Unexpected error: {ex.Message}").ConfigureAwait(false);
+        await logger.LogErrorAsync($"Stack trace: {ex.StackTrace}").ConfigureAwait(false);
         return 99;
     }
 }

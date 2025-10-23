@@ -63,12 +63,12 @@ public class PdfFontSubsetMergerTests
     }
 
     [Fact]
-    public void MergeDuplicateSubsets_Type0Fonts_MergesResourcesAndFormXObjects()
+    public async Task MergeDuplicateSubsets_Type0Fonts_MergesResourcesAndFormXObjects()
     {
         var source = CreateType0Document();
         var logger = new TestPdfLogger();
 
-        var merged = Merge(source, FontSubsetMergeOptions.CreateDefault(), logger);
+        var merged = await MergeAsync(source, FontSubsetMergeOptions.CreateDefault(), logger);
 
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontsMerged && e.Message.Contains("subset fonts", StringComparison.Ordinal));
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetMergePrepared && e.Message.Contains("Type0", StringComparison.Ordinal));
@@ -95,12 +95,12 @@ public class PdfFontSubsetMergerTests
     }
 
     [Fact]
-    public void MergeDuplicateSubsets_TrueTypeFonts_MergesToSingleResource()
+    public async Task MergeDuplicateSubsets_TrueTypeFonts_MergesToSingleResource()
     {
         var source = CreateTrueTypeDocument();
         var logger = new TestPdfLogger();
 
-        var merged = Merge(source, FontSubsetMergeOptions.CreateDefault(), logger);
+        var merged = await MergeAsync(source, FontSubsetMergeOptions.CreateDefault(), logger);
 
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontsMerged && e.Message.Contains("subset fonts", StringComparison.Ordinal));
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetMergePrepared && e.Message.Contains("TrueType", StringComparison.Ordinal));
@@ -117,13 +117,13 @@ public class PdfFontSubsetMergerTests
     }
 
     [Fact]
-    public void MergeDuplicateSubsets_WithWidthConflict_LogsClusterSplitAndKeepsDuplicates()
+    public async Task MergeDuplicateSubsets_WithWidthConflict_LogsClusterSplitAndKeepsDuplicates()
     {
         var source = CreateTrueTypeDocument();
         var conflicting = IntroduceWidthConflict(source);
         var logger = new TestPdfLogger();
 
-        var merged = Merge(conflicting, FontSubsetMergeOptions.CreateDefault(), logger);
+        var merged = await MergeAsync(conflicting, FontSubsetMergeOptions.CreateDefault(), logger);
 
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.FontClustersSplit && e.Level == TestPdfLogger.InfoLevel);
 
@@ -134,7 +134,7 @@ public class PdfFontSubsetMergerTests
     }
 
     [Fact]
-    public void MergeDuplicateSubsets_WithUnsupportedCidFontType0_LogsWarningAndSkips()
+    public async Task MergeDuplicateSubsets_WithUnsupportedCidFontType0_LogsWarningAndSkips()
     {
         var source = CreateType0Document();
         var withCidFont = InjectUnsupportedCIDFontType0(source);
@@ -151,14 +151,14 @@ public class PdfFontSubsetMergerTests
             }
         };
 
-        _ = Merge(withCidFont, options, logger);
+        _ = await MergeAsync(withCidFont, options, logger);
 
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype && e.Level == TestPdfLogger.WarningLevel);
     }
 
     [Theory]
     [MemberData(nameof(MergeDuplicateSubsetsAfterMergingDocumentsData))]
-    public void MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects(
+    public async Task MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects(
         string scenario,
         string firstVisibleText,
         string firstAdditionalGlyphsText,
@@ -208,7 +208,7 @@ public class PdfFontSubsetMergerTests
             }
 
             var logger = new TestPdfLogger();
-            var merged = Merge(combined, FontSubsetMergeOptions.CreateDefault(), logger);
+            var merged = await MergeAsync(combined, FontSubsetMergeOptions.CreateDefault(), logger);
             var mergedDocumentSize = merged.LongLength;
             LogDocumentSize("Combined document after merge", mergedDocumentSize);
             LogSizeReduction(combinedDocumentSize, mergedDocumentSize);
@@ -467,12 +467,12 @@ public class PdfFontSubsetMergerTests
         return result.ToArray();
     }
 
-    private static byte[] Merge(byte[] source, FontSubsetMergeOptions options, TestPdfLogger logger)
+    private static async Task<byte[]> MergeAsync(byte[] source, FontSubsetMergeOptions options, TestPdfLogger logger)
     {
         using var result = new MemoryStream();
         using (var pdf = new PdfDocument(new PdfReader(new MemoryStream(source)), new PdfWriter(result)))
         {
-            FontSubsetMerger.MergeDuplicateSubsets(pdf, options, logger);
+            await FontSubsetMerger.MergeDuplicateSubsetsAsync(pdf, options, logger).ConfigureAwait(false);
         }
 
         return result.ToArray();
