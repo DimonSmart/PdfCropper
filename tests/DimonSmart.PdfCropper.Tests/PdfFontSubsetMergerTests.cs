@@ -208,6 +208,75 @@ public class PdfFontSubsetMergerTests
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("\"Calibri\"", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task MergeDuplicateSubsets_DifferentWidths_StillMergesWhenCompatible()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new PdfWriter(stream))
+        {
+            writer.SetCloseStream(false);
+            using var doc = new PdfDocument(writer);
+            var page = doc.AddNewPage();
+
+            var font = PdfFontFactory.CreateFont(GetFontPath(), PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED);
+
+            var resources = page.GetResources().GetPdfObject();
+            var fontsDict = resources.GetAsDictionary(PdfName.Font);
+            if (fontsDict == null)
+            {
+                fontsDict = new PdfDictionary();
+                resources.Put(PdfName.Font, fontsDict);
+            }
+
+            var font1Name = new PdfName("F1");
+            var font2Name = new PdfName("F2");
+            
+            var fontDict1 = CreateFontDictionaryWithCustomWidths(font, new PdfArray(new[] { 500, 600, 700 }));
+            var fontDict2 = CreateFontDictionaryWithCustomWidths(font, new PdfArray(new[] { 500, 600, 700, 800 }));
+
+            fontsDict.Put(font1Name, fontDict1);
+            fontsDict.Put(font2Name, fontDict2);
+
+            var canvas = new PdfCanvas(page);
+            canvas.BeginText()
+                .SetFontAndSize(font, 12)
+                .MoveText(100, 700)
+                .ShowText("ABC")
+                .EndText();
+
+            canvas.BeginText()
+                .SetFontAndSize(font, 12)
+                .MoveText(100, 680)
+                .ShowText("DEF")
+                .EndText();
+        }
+
+        stream.Position = 0;
+        var logger = new TestPdfLogger();
+        var merged = await MergeAsync(stream.ToArray(), FontSubsetMergeOptions.CreateDefault(), logger);
+
+        var mergeEvents = logger.Events.Where(e => e.Id == FontMergeLogEventId.SubsetFontsMerged).ToList();
+        Assert.NotEmpty(mergeEvents);
+    }
+
+    private static PdfDictionary CreateFontDictionaryWithCustomWidths(PdfFont sourceFont, PdfArray widths)
+    {
+        var sourceFontDict = sourceFont.GetPdfObject();
+        var newFontDict = new PdfDictionary();
+        
+        foreach (var key in sourceFontDict.KeySet())
+        {
+            if (!key.Equals(PdfName.Widths))
+            {
+                newFontDict.Put(key, sourceFontDict.Get(key));
+            }
+        }
+        
+        newFontDict.Put(PdfName.Widths, widths);
+        
+        return newFontDict;
+    }
+
     private static PdfDictionary CreateAlternativeSubsetFontDictionary(PdfFont sourceFont, string baseFontName)
     {
         var sourceFontDict = sourceFont.GetPdfObject();
