@@ -31,30 +31,78 @@ public static class PdfFontSubsetMerger
     {
         private readonly FontSubsetMergeOptions options;
         private readonly IPdfCropLogger logger;
+        private readonly FontResourceGroupingComparer groupingComparer;
 
         public FontSubsetMergeService(FontSubsetMergeOptions options, IPdfCropLogger logger)
         {
             this.options = options;
             this.logger = logger;
+            groupingComparer = new FontResourceGroupingComparer();
         }
 
         public async Task MergeAsync(PdfDocument pdfDocument)
         {
-            var fonts = await new FontResourceIndexer(options, logger).CollectAsync(pdfDocument).ConfigureAwait(false);
+            var fonts = await new FontResourceIndexer(options, logger, groupingComparer).CollectAsync(pdfDocument).ConfigureAwait(false);
             if (fonts.Count == 0)
             {
                 return;
             }
 
-            var replacements = new List<FontResourceReplacement>();
-            var groups = fonts
+            var totalFontsMessage = $"Collected {fonts.Count} subset font resource(s) prior to grouping.";
+            await new FontMergeLogEvent(FontMergeLogEventId.FontResourcesCollected, FontMergeLogLevel.Info, totalFontsMessage)
+                .LogAsync(logger).ConfigureAwait(false);
+
+            var groupingCandidates = fonts
                 .GroupBy(entry => entry.MergeKey, StringComparer.Ordinal)
+                .ToList();
+
+            foreach (var candidate in groupingCandidates)
+            {
+                var canonicalFont = candidate.First();
+                var resources = string.Join(", ", candidate.Select(font => font.ResourceName.GetValue()));
+                var subtype = canonicalFont.Subtype ?? "unknown";
+                var groupingMessage = $"Grouping candidate \"{canonicalFont.CanonicalName}\" (subtype: {subtype}) contains {candidate.Count()} resource(s): {resources}.";
+                await new FontMergeLogEvent(FontMergeLogEventId.FontGroupSummary, FontMergeLogLevel.Info, groupingMessage)
+                    .LogAsync(logger).ConfigureAwait(false);
+            }
+
+            var canonicalBuckets = groupingCandidates
+                .GroupBy(candidate => candidate.First().CanonicalName, StringComparer.Ordinal)
+                .ToList();
+
+            foreach (var canonicalBucket in canonicalBuckets)
+            {
+                if (canonicalBucket.Count() <= 1)
+                {
+                    continue;
+                }
+
+                var canonicalName = canonicalBucket.Key;
+                var details = canonicalBucket
+                    .Select(bucket =>
+                    {
+                        var sample = bucket.First();
+                        var resources = string.Join(", ", bucket.Select(font => font.ResourceName.GetValue()));
+                        var subtype = sample.Subtype ?? "unknown";
+                        var fingerprint = groupingComparer.GetDictionaryFingerprint(sample.FontDictionary);
+                        return $"subtype: {subtype}, resources: [{resources}], fingerprint: {fingerprint}";
+                    });
+
+                var splitMessage = $"Canonical font \"{canonicalName}\" split into {canonicalBucket.Count()} grouping bucket(s) due to differing font dictionaries: {string.Join("; ", details)}.";
+                await new FontMergeLogEvent(FontMergeLogEventId.CanonicalFontSplitAcrossGroups, FontMergeLogLevel.Info, splitMessage)
+                    .LogAsync(logger).ConfigureAwait(false);
+            }
+
+            var replacements = new List<FontResourceReplacement>();
+            var groups = groupingCandidates
                 .Where(group => group.Count() > 1)
                 .ToList();
 
+            var duplicatesRemoved = 0;
+
             foreach (var group in groups)
             {
-                var clusters = await FontCompatibilityAnalyzer.SplitAsync(group.ToList(), logger).ConfigureAwait(false);
+                var clusters = await FontCompatibilityAnalyzer.SplitAsync(group.ToList(), groupingComparer, logger).ConfigureAwait(false);
                 foreach (var cluster in clusters)
                 {
                     if (cluster.Count <= 1)
@@ -69,6 +117,7 @@ public static class PdfFontSubsetMerger
                         await merger.MergeAsync(cluster).ConfigureAwait(false);
                     }
 
+                    duplicatesRemoved += cluster.Count - 1;
                     var replacementObject = canonical.ReplacementObject;
 
                     foreach (var duplicate in cluster.Skip(1))
@@ -88,6 +137,11 @@ public static class PdfFontSubsetMerger
             }
 
             await ApplyFontResourceReplacementsAsync(pdfDocument, replacements).ConfigureAwait(false);
+
+            var resultingFonts = fonts.Count - duplicatesRemoved;
+            var summaryMessage = $"Font subsets before merge: {fonts.Count}. After merge: {resultingFonts}.";
+            await new FontMergeLogEvent(FontMergeLogEventId.FontMergeResultSummary, FontMergeLogLevel.Info, summaryMessage)
+                .LogAsync(logger).ConfigureAwait(false);
         }
 
         private async Task ApplyFontResourceReplacementsAsync(
@@ -992,15 +1046,17 @@ public static class PdfFontSubsetMerger
     {
         private readonly FontSubsetMergeOptions options;
         private readonly IPdfCropLogger logger;
+        private readonly FontResourceGroupingComparer groupingComparer;
         private readonly HashSet<long> visitedStreams = new();
         private readonly HashSet<PdfObject> visitedPatternContainers = new(new PdfObjectReferenceComparer());
         private readonly Dictionary<FontResourceKey, FontResourceEntry> entries = new(new FontResourceKeyComparer());
         private readonly ContentStreamFontUsageCollector usageCollector;
 
-        public FontResourceIndexer(FontSubsetMergeOptions options, IPdfCropLogger logger)
+        public FontResourceIndexer(FontSubsetMergeOptions options, IPdfCropLogger logger, FontResourceGroupingComparer groupingComparer)
         {
             this.options = options;
             this.logger = logger;
+            this.groupingComparer = groupingComparer;
             usageCollector = new ContentStreamFontUsageCollector(entries);
         }
 
@@ -1105,7 +1161,8 @@ public static class PdfFontSubsetMerger
                 return;
             }
 
-            var entry = FontResourceEntry.Create(fontsDictionary, fontName, fontDictionary, canonicalName, subtype);
+            var mergeKey = groupingComparer.CreateMergeKey(canonicalName, subtype, fontDictionary);
+            var entry = FontResourceEntry.Create(fontsDictionary, fontName, fontDictionary, canonicalName, subtype, mergeKey);
             entries[key] = entry;
 
             var indexMessage = $"Indexed subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} with canonical name \"{canonicalName}\".";
@@ -1309,7 +1366,10 @@ public static class PdfFontSubsetMerger
 
     private static class FontCompatibilityAnalyzer
     {
-        public static async Task<List<List<FontResourceEntry>>> SplitAsync(List<FontResourceEntry> fonts, IPdfCropLogger logger)
+        public static async Task<List<List<FontResourceEntry>>> SplitAsync(
+            List<FontResourceEntry> fonts,
+            FontResourceGroupingComparer comparer,
+            IPdfCropLogger logger)
         {
             var clusters = new List<List<FontResourceEntry>>();
             foreach (var font in fonts)
@@ -1317,11 +1377,20 @@ public static class PdfFontSubsetMerger
                 var placed = false;
                 foreach (var cluster in clusters)
                 {
-                    if (IsCompatible(font, cluster[0]))
+                    var comparison = comparer.Compare(font, cluster[0]);
+                    if (comparison.IsCompatible)
                     {
                         cluster.Add(font);
                         placed = true;
                         break;
+                    }
+
+                    if (!string.IsNullOrEmpty(comparison.Reason))
+                    {
+                        var canonicalName = font.CanonicalName;
+                        var message = $"Font resource {font.ResourceName.GetValue()} could not join cluster anchored by {cluster[0].ResourceName.GetValue()} for \"{canonicalName}\": {comparison.Reason}";
+                        await new FontMergeLogEvent(FontMergeLogEventId.FontCompatibilityRejected, FontMergeLogLevel.Info, message)
+                            .LogAsync(logger).ConfigureAwait(false);
                     }
                 }
 
@@ -1339,48 +1408,6 @@ public static class PdfFontSubsetMerger
             }
 
             return clusters;
-        }
-
-        private static bool IsCompatible(FontResourceEntry left, FontResourceEntry right)
-        {
-            if (left.Kind != right.Kind)
-            {
-                return false;
-            }
-
-            var codes = new HashSet<int>(left.EncounteredCodes);
-            codes.UnionWith(right.EncounteredCodes);
-
-            foreach (var code in codes)
-            {
-                var leftHasUnicode = left.TryGetUnicode(code, out var leftUnicode);
-                var rightHasUnicode = right.TryGetUnicode(code, out var rightUnicode);
-
-                if (leftHasUnicode != rightHasUnicode)
-                {
-                    return false;
-                }
-
-                if (leftHasUnicode && !string.Equals(leftUnicode, rightUnicode, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                var leftHasWidth = left.TryGetWidth(code, out var leftWidth);
-                var rightHasWidth = right.TryGetWidth(code, out var rightWidth);
-
-                if (leftHasWidth != rightHasWidth)
-                {
-                    return false;
-                }
-
-                if (leftHasWidth && Math.Abs(leftWidth - rightWidth) > 0.01f)
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
     }
 
@@ -2467,10 +2494,10 @@ public static class PdfFontSubsetMerger
             PdfName resourceName,
             PdfDictionary fontDictionary,
             string canonicalName,
-            string? subtype)
+            string? subtype,
+            string mergeKey)
         {
             var replacementObject = (PdfObject?)fontDictionary.GetIndirectReference() ?? fontDictionary;
-            var mergeKey = FontMergeKeyFactory.Create(canonicalName, subtype, fontDictionary);
             var metrics = FontMetricsExtractor.Extract(fontDictionary);
             return new FontResourceEntry(parentFontsDictionary, resourceName, fontDictionary, replacementObject, canonicalName, subtype, mergeKey, metrics);
         }
@@ -3347,9 +3374,9 @@ public static class PdfFontSubsetMerger
         }
     }
 
-    private static class FontMergeKeyFactory
+    private sealed class FontResourceGroupingComparer
     {
-        public static string Create(string canonicalName, string? subtype, PdfDictionary fontDictionary)
+        public string CreateMergeKey(string canonicalName, string? subtype, PdfDictionary fontDictionary)
         {
             var builder = new StringBuilder();
             builder.Append(canonicalName);
@@ -3358,6 +3385,79 @@ public static class PdfFontSubsetMerger
             builder.Append('|');
             builder.Append(FontDictionaryFingerprint.Create(fontDictionary));
             return builder.ToString();
+        }
+
+        public string GetDictionaryFingerprint(PdfDictionary fontDictionary)
+        {
+            return FontDictionaryFingerprint.Create(fontDictionary);
+        }
+
+        public FontComparisonResult Compare(FontResourceEntry left, FontResourceEntry right)
+        {
+            if (left.Kind != right.Kind)
+            {
+                var reason = $"Font kinds differ ({left.Kind} vs {right.Kind}).";
+                return FontComparisonResult.Incompatible(reason);
+            }
+
+            var codes = new HashSet<int>(left.EncounteredCodes);
+            codes.UnionWith(right.EncounteredCodes);
+
+            foreach (var code in codes)
+            {
+                var leftHasUnicode = left.TryGetUnicode(code, out var leftUnicode);
+                var rightHasUnicode = right.TryGetUnicode(code, out var rightUnicode);
+
+                if (leftHasUnicode != rightHasUnicode)
+                {
+                    var reason = leftHasUnicode
+                        ? $"Glyph 0x{code:X} has ToUnicode mapping \"{leftUnicode}\" in {left.ResourceName.GetValue()} but no mapping in {right.ResourceName.GetValue()}."
+                        : $"Glyph 0x{code:X} has ToUnicode mapping \"{rightUnicode}\" in {right.ResourceName.GetValue()} but no mapping in {left.ResourceName.GetValue()}.";
+                    return FontComparisonResult.Incompatible(reason);
+                }
+
+                if (leftHasUnicode && !string.Equals(leftUnicode, rightUnicode, StringComparison.Ordinal))
+                {
+                    var reason = $"Glyph 0x{code:X} maps to \"{leftUnicode}\" in {left.ResourceName.GetValue()} but to \"{rightUnicode}\" in {right.ResourceName.GetValue()}.";
+                    return FontComparisonResult.Incompatible(reason);
+                }
+
+                var leftHasWidth = left.TryGetWidth(code, out var leftWidth);
+                var rightHasWidth = right.TryGetWidth(code, out var rightWidth);
+
+                if (leftHasWidth != rightHasWidth)
+                {
+                    var reason = leftHasWidth
+                        ? $"Glyph 0x{code:X} has width {leftWidth.ToString(CultureInfo.InvariantCulture)} in {left.ResourceName.GetValue()} but no width in {right.ResourceName.GetValue()}."
+                        : $"Glyph 0x{code:X} has width {rightWidth.ToString(CultureInfo.InvariantCulture)} in {right.ResourceName.GetValue()} but no width in {left.ResourceName.GetValue()}.";
+                    return FontComparisonResult.Incompatible(reason);
+                }
+
+                if (leftHasWidth && Math.Abs(leftWidth - rightWidth) > 0.01f)
+                {
+                    var reason = $"Glyph 0x{code:X} has width {leftWidth.ToString(CultureInfo.InvariantCulture)} in {left.ResourceName.GetValue()} but {rightWidth.ToString(CultureInfo.InvariantCulture)} in {right.ResourceName.GetValue()}.";
+                    return FontComparisonResult.Incompatible(reason);
+                }
+            }
+
+            return FontComparisonResult.Compatible();
+        }
+
+        public readonly struct FontComparisonResult
+        {
+            private FontComparisonResult(bool isCompatible, string? reason)
+            {
+                IsCompatible = isCompatible;
+                Reason = reason;
+            }
+
+            public bool IsCompatible { get; }
+
+            public string? Reason { get; }
+
+            public static FontComparisonResult Compatible() => new(true, null);
+
+            public static FontComparisonResult Incompatible(string reason) => new(false, reason);
         }
     }
 
