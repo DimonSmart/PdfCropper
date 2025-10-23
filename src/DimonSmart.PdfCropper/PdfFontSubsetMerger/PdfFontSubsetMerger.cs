@@ -43,36 +43,84 @@ public static class PdfFontSubsetMerger
             var fonts = await new FontResourceIndexer(options, logger).CollectAsync(pdfDocument).ConfigureAwait(false);
             if (fonts.Count == 0)
             {
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "No subset fonts found in document.").LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Found {fonts.Count} subset font(s) in document. Starting merge analysis...").LogAsync(logger).ConfigureAwait(false);
+            
+            foreach (var font in fonts)
+            {
+                var fontInfo = $"  - Font: \"{font.CanonicalName}\" (resource: {font.ResourceName.GetValue()}, subtype: {font.Subtype}, kind: {font.Kind}, mergeKey: {font.MergeKey}, glyphs: {font.EncounteredCodes.Count})";
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, fontInfo).LogAsync(logger).ConfigureAwait(false);
+            }
+
             var replacements = new List<FontResourceReplacement>();
-            var groups = fonts
+            var allGroups = fonts
                 .GroupBy(entry => entry.MergeKey, StringComparer.Ordinal)
-                .Where(group => group.Count() > 1)
                 .ToList();
+            
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Grouped {fonts.Count} fonts into {allGroups.Count} merge group(s) by MergeKey.").LogAsync(logger).ConfigureAwait(false);
+            
+            foreach (var group in allGroups)
+            {
+                var groupInfo = $"  - MergeKey: \"{group.Key}\" has {group.Count()} font(s): {string.Join(", ", group.Select(f => f.ResourceName.GetValue()))}";
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, groupInfo).LogAsync(logger).ConfigureAwait(false);
+            }
+            
+            var groups = allGroups.Where(group => group.Count() > 1).ToList();
+            
+            if (groups.Count == 0)
+            {
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "No font groups with multiple fonts found. Nothing to merge.").LogAsync(logger).ConfigureAwait(false);
+            }
+            else
+            {
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Found {groups.Count} group(s) with multiple fonts that can potentially be merged.").LogAsync(logger).ConfigureAwait(false);
+            }
 
             foreach (var group in groups)
             {
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Processing merge group with MergeKey: \"{group.Key}\" ({group.Count()} fonts)...").LogAsync(logger).ConfigureAwait(false);
+                
                 var clusters = await FontCompatibilityAnalyzer.SplitAsync(group.ToList(), logger).ConfigureAwait(false);
-                foreach (var cluster in clusters)
+                
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Split into {clusters.Count} compatibility cluster(s).").LogAsync(logger).ConfigureAwait(false);
+                
+                for (var clusterIndex = 0; clusterIndex < clusters.Count; clusterIndex++)
                 {
+                    var cluster = clusters[clusterIndex];
+                    
+                    await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, $"  Cluster #{clusterIndex + 1}: {cluster.Count} font(s) - {string.Join(", ", cluster.Select(f => f.ResourceName.GetValue()))}").LogAsync(logger).ConfigureAwait(false);
+                    
                     if (cluster.Count <= 1)
                     {
+                        await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, $"  Cluster #{clusterIndex + 1}: Skipped (only 1 font, nothing to merge).").LogAsync(logger).ConfigureAwait(false);
                         continue;
                     }
 
                     var canonical = cluster[0];
+                    await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, $"  Cluster #{clusterIndex + 1}: Using \"{canonical.ResourceName.GetValue()}\" as canonical font for merging.").LogAsync(logger).ConfigureAwait(false);
+                    
                     var merger = FontSubsetMergerFactory.TryCreate(canonical.Kind, logger);
-                    if (merger != null)
+                    if (merger == null)
                     {
+                        await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype, FontMergeLogLevel.Warning, $"  Cluster #{clusterIndex + 1}: No merger available for font kind {canonical.Kind}. Skipping cluster.").LogAsync(logger).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, $"  Cluster #{clusterIndex + 1}: Merging font data using {merger.GetType().Name}...").LogAsync(logger).ConfigureAwait(false);
                         await merger.MergeAsync(cluster).ConfigureAwait(false);
                     }
 
                     var replacementObject = canonical.ReplacementObject;
 
+                    var duplicateCount = 0;
                     foreach (var duplicate in cluster.Skip(1))
                     {
+                        duplicateCount++;
+                        await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, $"    Replacing duplicate #{duplicateCount}: \"{duplicate.ResourceName.GetValue()}\" -> \"{canonical.ResourceName.GetValue()}\"").LogAsync(logger).ConfigureAwait(false);
+                        
                         duplicate.ParentFontsDictionary.Put(duplicate.ResourceName, replacementObject);
                         replacements.Add(new FontResourceReplacement(
                             duplicate.ParentFontsDictionary,
@@ -82,11 +130,12 @@ public static class PdfFontSubsetMerger
                             canonical.CanonicalName));
                     }
 
-                    var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\".";
+                    var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\" (canonical: {canonical.ResourceName.GetValue()}, duplicates replaced: {duplicateCount}).";
                     await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Total font replacements to apply: {replacements.Count}").LogAsync(logger).ConfigureAwait(false);
             await ApplyFontResourceReplacementsAsync(pdfDocument, replacements).ConfigureAwait(false);
         }
 
