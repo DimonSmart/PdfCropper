@@ -6,6 +6,7 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Utils;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -92,6 +93,25 @@ public class PdfFontSubsetMergerTests
             Assert.True(names.All(name => name == canonicalResourceName));
         });
         Assert.Equal(Type0PageText + Type0FormText, ExtractText(page));
+    }
+
+    [Fact]
+    public async Task MergeDuplicateSubsets_WithHyphenatedSubsetNames_MergesResources()
+    {
+        var source = CreateType0Document();
+        var renamed = RenameFontBaseNames(source, "Calibri-0-50", "Calibri-1-50");
+        var logger = new TestPdfLogger();
+
+        var merged = await MergeAsync(renamed, FontSubsetMergeOptions.CreateDefault(), logger);
+
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("Calibri-0-50", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("Calibri-1-50", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontsMerged && e.Message.Contains("Calibri", StringComparison.Ordinal));
+
+        using var pdf = new PdfDocument(new PdfReader(new MemoryStream(merged)));
+        var page = pdf.GetPage(1);
+        var fonts = GetFontsDictionary(page);
+        Assert.Single(fonts.KeySet());
     }
 
     [Fact]
@@ -375,6 +395,92 @@ public class PdfFontSubsetMergerTests
         }
 
         return stream.ToArray();
+    }
+
+    private static byte[] RenameFontBaseNames(byte[] pdfBytes, params string[] newBaseNames)
+    {
+        using var result = new MemoryStream();
+        using (var pdf = new PdfDocument(new PdfReader(new MemoryStream(pdfBytes)), new PdfWriter(result)))
+        {
+            var queue = new Queue<string>(newBaseNames);
+            var pageCount = pdf.GetNumberOfPages();
+            for (var pageIndex = 1; pageIndex <= pageCount && queue.Count > 0; pageIndex++)
+            {
+                var page = pdf.GetPage(pageIndex);
+                var resources = page.GetResources()?.GetPdfObject();
+                RenameFontBaseNames(resources, queue);
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    private static void RenameFontBaseNames(PdfDictionary? resources, Queue<string> queue)
+    {
+        if (resources == null || queue.Count == 0)
+        {
+            return;
+        }
+
+        var fonts = resources.GetAsDictionary(PdfName.Font);
+        if (fonts != null)
+        {
+            foreach (var name in fonts.KeySet())
+            {
+                if (queue.Count == 0)
+                {
+                    break;
+                }
+
+                var fontDictionary = fonts.GetAsDictionary(name);
+                if (fontDictionary == null)
+                {
+                    continue;
+                }
+
+                ApplyNewFontBaseName(fontDictionary, queue.Dequeue());
+            }
+        }
+
+        var xObjects = resources.GetAsDictionary(PdfName.XObject);
+        if (xObjects == null || queue.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var key in xObjects.KeySet())
+        {
+            if (queue.Count == 0)
+            {
+                break;
+            }
+
+            var stream = xObjects.GetAsStream(key);
+            if (stream == null)
+            {
+                continue;
+            }
+
+            var streamResources = stream.GetAsDictionary(PdfName.Resources);
+            RenameFontBaseNames(streamResources, queue);
+        }
+    }
+
+    private static void ApplyNewFontBaseName(PdfDictionary fontDictionary, string newBaseName)
+    {
+        fontDictionary.Put(PdfName.BaseFont, new PdfName(newBaseName));
+
+        var descriptor = fontDictionary.GetAsDictionary(PdfName.FontDescriptor);
+        descriptor?.Put(PdfName.FontName, new PdfName(newBaseName));
+
+        var descendants = fontDictionary.GetAsArray(PdfName.DescendantFonts);
+        var descendant = descendants?.GetAsDictionary(0);
+        if (descendant != null)
+        {
+            descendant.Put(PdfName.BaseFont, new PdfName(newBaseName));
+            var descendantDescriptor = descendant.GetAsDictionary(PdfName.FontDescriptor);
+            descendantDescriptor?.Put(PdfName.FontName, new PdfName(newBaseName));
+        }
     }
 
     private static byte[] CreateTrueTypeDocument()

@@ -3569,6 +3569,11 @@ public static class PdfFontSubsetMerger
                 return false;
             }
 
+            if (TryGetNumericSuffixCanonicalName(baseFontName, out _))
+            {
+                return true;
+            }
+
             var plusIndex = baseFontName.IndexOf('+');
             if (plusIndex <= 0 || plusIndex >= baseFontName.Length - 1)
             {
@@ -3593,6 +3598,11 @@ public static class PdfFontSubsetMerger
                 return null;
             }
 
+            if (TryGetNumericSuffixCanonicalName(baseFontName, out var canonicalFromSuffix))
+            {
+                return canonicalFromSuffix;
+            }
+
             var plusIndex = baseFontName.IndexOf('+');
             if (plusIndex > 0 && plusIndex < baseFontName.Length - 1)
             {
@@ -3600,6 +3610,74 @@ public static class PdfFontSubsetMerger
             }
 
             return baseFontName;
+        }
+
+        private static bool TryGetNumericSuffixCanonicalName(string baseFontName, out string canonicalName)
+        {
+            canonicalName = string.Empty;
+
+            var span = baseFontName.AsSpan();
+            var firstDash = span.IndexOf('-');
+            if (firstDash <= 0 || firstDash >= span.Length - 1)
+            {
+                return false;
+            }
+
+            var prefix = span[..firstDash];
+            var remainder = span[(firstDash + 1)..];
+            if (prefix.Length == 0 || remainder.Length == 0)
+            {
+                return false;
+            }
+
+            var segmentCount = 0;
+            while (true)
+            {
+                var nextDash = remainder.IndexOf('-');
+                var segment = nextDash >= 0 ? remainder[..nextDash] : remainder;
+                if (!IsAllDigits(segment))
+                {
+                    return false;
+                }
+
+                segmentCount++;
+                if (nextDash < 0)
+                {
+                    break;
+                }
+
+                remainder = remainder[(nextDash + 1)..];
+                if (remainder.Length == 0)
+                {
+                    return false;
+                }
+            }
+
+            if (segmentCount < 2)
+            {
+                return false;
+            }
+
+            canonicalName = prefix.ToString();
+            return true;
+        }
+
+        private static bool IsAllDigits(ReadOnlySpan<char> span)
+        {
+            if (span.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var ch in span)
+            {
+                if (!char.IsDigit(ch))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 
