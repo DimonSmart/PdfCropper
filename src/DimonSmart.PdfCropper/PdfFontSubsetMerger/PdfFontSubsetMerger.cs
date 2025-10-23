@@ -3408,15 +3408,7 @@ public static class PdfFontSubsetMerger
                 var leftHasUnicode = left.TryGetUnicode(code, out var leftUnicode);
                 var rightHasUnicode = right.TryGetUnicode(code, out var rightUnicode);
 
-                if (leftHasUnicode != rightHasUnicode)
-                {
-                    var reason = leftHasUnicode
-                        ? $"Glyph 0x{code:X} has ToUnicode mapping \"{leftUnicode}\" in {left.ResourceName.GetValue()} but no mapping in {right.ResourceName.GetValue()}."
-                        : $"Glyph 0x{code:X} has ToUnicode mapping \"{rightUnicode}\" in {right.ResourceName.GetValue()} but no mapping in {left.ResourceName.GetValue()}.";
-                    return FontComparisonResult.Incompatible(reason);
-                }
-
-                if (leftHasUnicode && !string.Equals(leftUnicode, rightUnicode, StringComparison.Ordinal))
+                if (leftHasUnicode && rightHasUnicode && !string.Equals(leftUnicode, rightUnicode, StringComparison.Ordinal))
                 {
                     var reason = $"Glyph 0x{code:X} maps to \"{leftUnicode}\" in {left.ResourceName.GetValue()} but to \"{rightUnicode}\" in {right.ResourceName.GetValue()}.";
                     return FontComparisonResult.Incompatible(reason);
