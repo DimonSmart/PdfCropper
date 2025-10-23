@@ -993,6 +993,7 @@ public static class PdfFontSubsetMerger
         private readonly FontSubsetMergeOptions options;
         private readonly IPdfCropLogger logger;
         private readonly HashSet<long> visitedStreams = new();
+        private readonly HashSet<PdfObject> visitedPatternContainers = new(new PdfObjectReferenceComparer());
         private readonly Dictionary<FontResourceKey, FontResourceEntry> entries = new(new FontResourceKeyComparer());
         private readonly ContentStreamFontUsageCollector usageCollector;
 
@@ -1001,6 +1002,13 @@ public static class PdfFontSubsetMerger
             this.options = options;
             this.logger = logger;
             usageCollector = new ContentStreamFontUsageCollector(entries);
+        }
+
+        private sealed class PdfObjectReferenceComparer : IEqualityComparer<PdfObject>
+        {
+            public bool Equals(PdfObject? x, PdfObject? y) => ReferenceEquals(x, y);
+
+            public int GetHashCode(PdfObject obj) => RuntimeHelpers.GetHashCode(obj);
         }
 
         public async Task<List<FontResourceEntry>> CollectAsync(PdfDocument pdfDocument)
@@ -1049,6 +1057,8 @@ public static class PdfFontSubsetMerger
                     await TryCreateEntryAsync(fontsDictionary, fontName, pageNumber).ConfigureAwait(false);
                 }
             }
+
+            await CollectFromPatternsAsync(resources, pageNumber).ConfigureAwait(false);
 
             if (options.IncludeFormXObjects)
             {
@@ -1100,6 +1110,78 @@ public static class PdfFontSubsetMerger
 
             var indexMessage = $"Indexed subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} with canonical name \"{canonicalName}\".";
             await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, indexMessage).LogAsync(logger).ConfigureAwait(false);
+        }
+
+        private async Task CollectFromPatternsAsync(PdfDictionary resources, int pageNumber)
+        {
+            var patterns = resources.GetAsDictionary(PdfName.Pattern);
+            if (patterns == null)
+            {
+                return;
+            }
+
+            foreach (var name in patterns.KeySet())
+            {
+                var patternObject = patterns.Get(name);
+                await CollectFromPatternObjectAsync(patternObject, pageNumber).ConfigureAwait(false);
+            }
+        }
+
+        private async Task CollectFromPatternObjectAsync(PdfObject? patternObject, int pageNumber)
+        {
+            switch (patternObject)
+            {
+                case null:
+                    return;
+                case PdfIndirectReference reference:
+                    await CollectFromPatternObjectAsync(reference.GetRefersTo(), pageNumber).ConfigureAwait(false);
+                    return;
+                case PdfStream stream:
+                    if (!TryVisitPatternStream(stream))
+                    {
+                        return;
+                    }
+
+                    var patternResources = stream.GetAsDictionary(PdfName.Resources);
+                    await CollectFromResourcesAsync(patternResources, pageNumber).ConfigureAwait(false);
+                    usageCollector.Collect(patternResources, stream.GetBytes(true));
+                    return;
+                case PdfDictionary dictionary:
+                    if (!visitedPatternContainers.Add(dictionary))
+                    {
+                        return;
+                    }
+
+                    foreach (var key in dictionary.KeySet())
+                    {
+                        await CollectFromPatternObjectAsync(dictionary.Get(key), pageNumber).ConfigureAwait(false);
+                    }
+
+                    return;
+                case PdfArray array:
+                    if (!visitedPatternContainers.Add(array))
+                    {
+                        return;
+                    }
+
+                    for (var i = 0; i < array.Size(); i++)
+                    {
+                        await CollectFromPatternObjectAsync(array.Get(i), pageNumber).ConfigureAwait(false);
+                    }
+
+                    return;
+            }
+        }
+
+        private bool TryVisitPatternStream(PdfStream stream)
+        {
+            var reference = stream.GetIndirectReference();
+            if (reference != null)
+            {
+                return visitedStreams.Add(ReferenceKey(reference));
+            }
+
+            return visitedPatternContainers.Add(stream);
         }
 
         private async Task CollectFromFormXObjectsAsync(PdfDictionary resources, int pageNumber)
@@ -3310,9 +3392,11 @@ public static class PdfFontSubsetMerger
             PdfName.ToUnicode,
             PdfName.FirstChar,
             PdfName.LastChar,
+            PdfName.Widths,
             PdfName.FontFile,
             PdfName.FontFile2,
             PdfName.FontFile3,
+            PdfName.W,
             PdfName.Length1
         };
 
