@@ -316,8 +316,8 @@ public static class PdfSmartCropper
             var pageStopwatch = Stopwatch.StartNew();
             var pageSize = page.GetPageSize();
 
-            var sizeMessage = $"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts";
-            await logger.LogInfoAsync(sizeMessage).ConfigureAwait(false);
+            //var sizeMessage = $"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts";
+            //await logger.LogInfoAsync(sizeMessage).ConfigureAwait(false);
             
             await Task.Yield();
 
@@ -408,7 +408,7 @@ public static class PdfSmartCropper
                 var bounds = ContentBasedCroppingStrategy.CalculateBounds(analysis);
                 if (bounds.HasValue)
                 {
-                    await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
+                    //await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
                     cropRectangle = bounds.Value.ToRectangle(pageSize, cropSettings.Margin);
                 }
             }
@@ -417,24 +417,24 @@ public static class PdfSmartCropper
             {
                 await logger.LogWarningAsync($"Page {pageIndex}: No crop applied (no content bounds found)").ConfigureAwait(false);
                 var totalTime = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
-                await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}").ConfigureAwait(false);
+                //await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}").ConfigureAwait(false);
                 
                 await Task.Yield();
                 continue;
             }
 
-            await logger.LogInfoAsync($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})").ConfigureAwait(false);
+            //await logger.LogInfoAsync($"Page {pageIndex}: Crop box = ({cropRectangle.GetLeft():F2}, {cropRectangle.GetBottom():F2}, {cropRectangle.GetWidth():F2}, {cropRectangle.GetHeight():F2})").ConfigureAwait(false);
 
             page.SetCropBox(cropRectangle);
             page.SetTrimBox(cropRectangle);
 
-            var croppedMessage = $"Page {pageIndex}: Cropped size = {cropRectangle.GetWidth():F2} x {cropRectangle.GetHeight():F2} pts";
-            await logger.LogInfoAsync(croppedMessage).ConfigureAwait(false);
+            //var croppedMessage = $"Page {pageIndex}: Cropped size = {cropRectangle.GetWidth():F2} x {cropRectangle.GetHeight():F2} pts";
+            //await logger.LogInfoAsync(croppedMessage).ConfigureAwait(false);
 
             pageStopwatch.Stop();
             var totalDuration = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
-            var timeMessage = $"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}";
-            await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
+            //var timeMessage = $"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}";
+            //await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
             
             await Task.Yield();
         }
