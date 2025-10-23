@@ -48,12 +48,16 @@ public static class PdfFontSubsetMerger
             }
 
             await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Found {fonts.Count} subset font(s) in document. Starting merge analysis...").LogAsync(logger).ConfigureAwait(false);
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "\n========== FONTS BEFORE MERGING ==========").LogAsync(logger).ConfigureAwait(false);
             
             foreach (var font in fonts)
             {
-                var fontInfo = $"  - Font: \"{font.CanonicalName}\" (resource: {font.ResourceName.GetValue()}, subtype: {font.Subtype}, kind: {font.Kind}, mergeKey: {font.MergeKey}, glyphs: {font.EncounteredCodes.Count})";
+                var pages = font.UsedOnPages.Count > 0 ? string.Join(", ", font.UsedOnPages.OrderBy(p => p)) : "unknown";
+                var fontInfo = $"  Font: \"{font.CanonicalName}\"\n    Resource: {font.ResourceName.GetValue()}\n    Subtype: {font.Subtype}\n    Kind: {font.Kind}\n    Glyphs: {font.EncounteredCodes.Count}\n    Pages: [{pages}]\n    MergeKey: {font.MergeKey}";
                 await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, fontInfo).LogAsync(logger).ConfigureAwait(false);
             }
+            
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "=========================================\n").LogAsync(logger).ConfigureAwait(false);
 
             var replacements = new List<FontResourceReplacement>();
             var allGroups = fonts
@@ -137,6 +141,19 @@ public static class PdfFontSubsetMerger
 
             await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Total font replacements to apply: {replacements.Count}").LogAsync(logger).ConfigureAwait(false);
             await ApplyFontResourceReplacementsAsync(pdfDocument, replacements).ConfigureAwait(false);
+            
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "\n========== FONTS AFTER MERGING ==========").LogAsync(logger).ConfigureAwait(false);
+            var remainingFonts = await new FontResourceIndexer(options, logger).CollectAsync(pdfDocument).ConfigureAwait(false);
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, $"Remaining {remainingFonts.Count} subset font(s) after merge:").LogAsync(logger).ConfigureAwait(false);
+            
+            foreach (var font in remainingFonts)
+            {
+                var pages = font.UsedOnPages.Count > 0 ? string.Join(", ", font.UsedOnPages.OrderBy(p => p)) : "unknown";
+                var fontInfo = $"  Font: \"{font.CanonicalName}\"\n    Resource: {font.ResourceName.GetValue()}\n    Subtype: {font.Subtype}\n    Kind: {font.Kind}\n    Glyphs: {font.EncounteredCodes.Count}\n    Pages: [{pages}]\n    MergeKey: {font.MergeKey}";
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, fontInfo).LogAsync(logger).ConfigureAwait(false);
+            }
+            
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, "=========================================\n").LogAsync(logger).ConfigureAwait(false);
         }
 
         private async Task ApplyFontResourceReplacementsAsync(
@@ -1141,10 +1158,12 @@ public static class PdfFontSubsetMerger
             var key = new FontResourceKey(fontsDictionary, fontName);
             if (entries.ContainsKey(key))
             {
+                entries[key].UsedOnPages.Add(pageNumber);
                 return;
             }
 
             var entry = FontResourceEntry.Create(fontsDictionary, fontName, fontDictionary, canonicalName, subtype);
+            entry.UsedOnPages.Add(pageNumber);
             entries[key] = entry;
 
             var indexMessage = $"Indexed subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} with canonical name \"{canonicalName}\".";
@@ -2420,6 +2439,8 @@ public static class PdfFontSubsetMerger
         public FontSubsetKind Kind { get; }
 
         public HashSet<int> EncounteredCodes { get; } = new();
+
+        public HashSet<int> UsedOnPages { get; } = new();
 
         public IReadOnlyDictionary<int, float> GlyphWidths => widths;
 
