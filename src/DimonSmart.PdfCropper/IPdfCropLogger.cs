@@ -23,33 +23,3 @@ public interface IPdfCropLogger
     /// <param name="message">The message to log.</param>
     Task LogErrorAsync(string message);
 }
-
-/// <summary>
-/// Extension methods for <see cref="IPdfCropLogger"/> to provide synchronous logging.
-/// </summary>
-public static class PdfCropLoggerExtensions
-{
-    /// <summary>
-    /// Logs an informational message synchronously.
-    /// </summary>
-    public static void LogInfo(this IPdfCropLogger logger, string message)
-    {
-        logger.LogInfoAsync(message).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Logs a warning message synchronously.
-    /// </summary>
-    public static void LogWarning(this IPdfCropLogger logger, string message)
-    {
-        logger.LogWarningAsync(message).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Logs an error message synchronously.
-    /// </summary>
-    public static void LogError(this IPdfCropLogger logger, string message)
-    {
-        logger.LogErrorAsync(message).GetAwaiter().GetResult();
-    }
-}

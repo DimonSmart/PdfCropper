@@ -205,7 +205,7 @@ public static class PdfSmartCropper
         using var pdfDocument = new PdfDocument(reader, writer);
 
         await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
-        ApplyFinalOptimizations(pdfDocument, optimizationSettings, logger);
+        await ApplyFinalOptimizationsAsync(pdfDocument, optimizationSettings, logger).ConfigureAwait(false);
         pdfDocument.Close();
 
         return outputStream.ToArray();
@@ -250,7 +250,7 @@ public static class PdfSmartCropper
             await Task.Yield();
         }
 
-        ApplyFinalOptimizations(outputDocument, optimizationSettings, logger);
+        await ApplyFinalOptimizationsAsync(outputDocument, optimizationSettings, logger).ConfigureAwait(false);
         outputDocument.Close();
 
         return outputStream.ToArray();
@@ -383,13 +383,13 @@ public static class PdfSmartCropper
                 CropMethod.ContentBased => null,
                 CropMethod.BitmapBased when BitmapBasedCroppingStrategy.IsSupportedOnCurrentPlatform() =>
 #pragma warning disable CA1416 // Validate platform compatibility
-                    BitmapBasedCroppingStrategy.CropPage(
+                    await BitmapBasedCroppingStrategy.CropPageAsync(
                         inputPdf,
                         pageIndex,
                         pageSize,
                         logger,
                         cropSettings.Margin,
-                        ct),
+                        ct).ConfigureAwait(false),
 #pragma warning restore CA1416 // Validate platform compatibility
                 CropMethod.BitmapBased => throw new PdfCropException(
                     PdfCropErrorCode.ProcessingError,
@@ -440,14 +440,14 @@ public static class PdfSmartCropper
         }
     }
 
-    private static void ApplyFinalOptimizations(
+    private static async Task ApplyFinalOptimizationsAsync(
         PdfDocument pdfDocument,
         PdfOptimizationSettings optimizationSettings,
         IPdfCropLogger logger)
     {
         if (optimizationSettings.MergeDuplicateFontSubsets)
         {
-            FontSubsetMerger.MergeDuplicateSubsets(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger);
+            await FontSubsetMerger.MergeDuplicateSubsetsAsync(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger).ConfigureAwait(false);
         }
 
         PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
@@ -641,7 +641,7 @@ public static class PdfSmartCropper
         }
     }
 
-    private static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings)
+    internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings)
     {
         var props = new WriterProperties();
 
@@ -663,7 +663,7 @@ public static class PdfSmartCropper
         return props;
     }
 
-    internal static WriterProperties CreateWriterProperties(PdfOptimizationSettings optimizationSettings, IPdfCropLogger? logger = null)
+    internal static async Task<WriterProperties> CreateWriterPropertiesAsync(PdfOptimizationSettings optimizationSettings, IPdfCropLogger? logger = null)
     {
         var props = new WriterProperties();
 
@@ -671,27 +671,32 @@ public static class PdfSmartCropper
         {
             var level = optimizationSettings.CompressionLevel.Value;
             props.SetCompressionLevel(level);
-            logger?.LogInfo($"Setting compression level to: {level}");
+            if (logger != null)
+                await logger.LogInfoAsync($"Setting compression level to: {level}").ConfigureAwait(false);
         }
         else
         {
-            logger?.LogInfo("Using default compression level");
+            if (logger != null)
+                await logger.LogInfoAsync("Using default compression level").ConfigureAwait(false);
         }
 
         if (optimizationSettings.TargetPdfVersion != null)
         {
             props.SetPdfVersion(optimizationSettings.TargetPdfVersion.Value.ToPdfVersion());
-            logger?.LogInfo($"Setting target PDF version to: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}");
+            if (logger != null)
+                await logger.LogInfoAsync($"Setting target PDF version to: {optimizationSettings.TargetPdfVersion.Value.ToVersionString()}").ConfigureAwait(false);
         }
         else
         {
-            logger?.LogInfo("Preserving original PDF version");
+            if (logger != null)
+                await logger.LogInfoAsync("Preserving original PDF version").ConfigureAwait(false);
         }
 
         if (optimizationSettings.EnableFullCompression)
         {
             props.SetFullCompressionMode(true);
-            logger?.LogInfo("Full compression mode enabled");
+            if (logger != null)
+                await logger.LogInfoAsync("Full compression mode enabled").ConfigureAwait(false);
         }
 
         return props;

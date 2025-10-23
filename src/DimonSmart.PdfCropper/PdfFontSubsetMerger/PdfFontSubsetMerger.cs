@@ -13,7 +13,7 @@ namespace DimonSmart.PdfCropper.PdfFontSubsetMerger;
 
 public static class PdfFontSubsetMerger
 {
-    public static void MergeDuplicateSubsets(
+    public static async Task MergeDuplicateSubsetsAsync(
         PdfDocument pdfDocument,
         FontSubsetMergeOptions? options = null,
         IPdfCropLogger? logger = null)
@@ -24,7 +24,7 @@ public static class PdfFontSubsetMerger
         var effectiveOptions = options ?? FontSubsetMergeOptions.CreateDefault();
 
         var service = new FontSubsetMergeService(effectiveOptions, effectiveLogger);
-        service.Merge(pdfDocument);
+        await service.MergeAsync(pdfDocument).ConfigureAwait(false);
     }
 
     private sealed class FontSubsetMergeService
@@ -38,9 +38,9 @@ public static class PdfFontSubsetMerger
             this.logger = logger;
         }
 
-        public void Merge(PdfDocument pdfDocument)
+        public async Task MergeAsync(PdfDocument pdfDocument)
         {
-            var fonts = new FontResourceIndexer(options, logger).Collect(pdfDocument);
+            var fonts = await new FontResourceIndexer(options, logger).CollectAsync(pdfDocument).ConfigureAwait(false);
             if (fonts.Count == 0)
             {
                 return;
@@ -54,7 +54,7 @@ public static class PdfFontSubsetMerger
 
             foreach (var group in groups)
             {
-                var clusters = FontCompatibilityAnalyzer.Split(group.ToList(), logger);
+                var clusters = await FontCompatibilityAnalyzer.SplitAsync(group.ToList(), logger).ConfigureAwait(false);
                 foreach (var cluster in clusters)
                 {
                     if (cluster.Count <= 1)
@@ -63,9 +63,11 @@ public static class PdfFontSubsetMerger
                     }
 
                     var canonical = cluster[0];
-                    FontSubsetMergerFactory
-                        .TryCreate(canonical.Kind, logger)
-                        ?.Merge(cluster);
+                    var merger = FontSubsetMergerFactory.TryCreate(canonical.Kind, logger);
+                    if (merger != null)
+                    {
+                        await merger.MergeAsync(cluster).ConfigureAwait(false);
+                    }
 
                     var replacementObject = canonical.ReplacementObject;
 
@@ -81,14 +83,14 @@ public static class PdfFontSubsetMerger
                     }
 
                     var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\".";
-                    new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontsMerged, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
-            ApplyFontResourceReplacements(pdfDocument, replacements);
+            await ApplyFontResourceReplacementsAsync(pdfDocument, replacements).ConfigureAwait(false);
         }
 
-        private void ApplyFontResourceReplacements(
+        private async Task ApplyFontResourceReplacementsAsync(
             PdfDocument pdfDocument,
             List<FontResourceReplacement> replacements)
         {
@@ -115,7 +117,7 @@ public static class PdfFontSubsetMerger
 
             foreach (var info in updates.Values)
             {
-                info.Apply(logger);
+                await info.ApplyAsync(logger).ConfigureAwait(false);
                 if (info.RenameMap.Count > 0)
                 {
                     renameLookup[info.FontsDictionary] = info.RenameMap;
@@ -137,18 +139,18 @@ public static class PdfFontSubsetMerger
                 var resources = page.GetResources()?.GetPdfObject() as PdfDictionary
                     ?? page.GetPdfObject()?.GetAsDictionary(PdfName.Resources);
 
-                ProcessPageContent(page, resources, pageIndex, renameLookup, usedFontNames, visitedStreams);
+                await ProcessPageContentAsync(page, resources, pageIndex, renameLookup, usedFontNames, visitedStreams).ConfigureAwait(false);
 
                 if (options.IncludeAnnotations)
                 {
-                    ProcessAnnotations(page, pageIndex, renameLookup, usedFontNames, visitedStreams);
+                    await ProcessAnnotationsAsync(page, pageIndex, renameLookup, usedFontNames, visitedStreams).ConfigureAwait(false);
                 }
             }
 
-            RemoveUnusedFonts(renameLookup, usedFontNames);
+            await RemoveUnusedFontsAsync(renameLookup, usedFontNames).ConfigureAwait(false);
         }
 
-        private void ProcessPageContent(
+        private async Task ProcessPageContentAsync(
             PdfPage page,
             PdfDictionary? resources,
             int pageNumber,
@@ -181,18 +183,18 @@ public static class PdfFontSubsetMerger
                             }
                         }
 
-                        ProcessStream(stream, renameMap, usageSet, $"page {pageNumber}");
+                        await ProcessStreamAsync(stream, renameMap, usageSet, $"page {pageNumber}").ConfigureAwait(false);
                     }
                 }
 
                 if (options.IncludeFormXObjects)
                 {
-                    ProcessFormXObjects(resources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                    await ProcessFormXObjectsAsync(resources, pageNumber, renameLookup, usedFontNames, visitedStreams).ConfigureAwait(false);
                 }
             }
         }
 
-        private void ProcessFormXObjects(
+        private async Task ProcessFormXObjectsAsync(
             PdfDictionary resources,
             int pageNumber,
             Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
@@ -234,17 +236,17 @@ public static class PdfFontSubsetMerger
                 {
                     var context = $"form XObject {name.GetValue()} on page {pageNumber}";
                     var usageSet = GetUsageSet(fontsDictionary, usedFontNames);
-                    ProcessStream(stream, renameMap, usageSet, context);
+                    await ProcessStreamAsync(stream, renameMap, usageSet, context).ConfigureAwait(false);
                 }
 
                 if (options.IncludeFormXObjects)
                 {
-                    ProcessFormXObjects(nestedResources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                    await ProcessFormXObjectsAsync(nestedResources, pageNumber, renameLookup, usedFontNames, visitedStreams).ConfigureAwait(false);
                 }
             }
         }
 
-        private void ProcessAnnotations(
+        private async Task ProcessAnnotationsAsync(
             PdfPage page,
             int pageNumber,
             Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
@@ -275,18 +277,18 @@ public static class PdfFontSubsetMerger
                 foreach (var name in appearanceDictionary.KeySet())
                 {
                     var appearanceObject = appearanceDictionary.Get(name);
-                    ProcessAppearanceObject(
+                    await ProcessAppearanceObjectAsync(
                         appearanceObject,
                         pageNumber,
                         $"annotation appearance {name.GetValue()} on page {pageNumber}",
                         renameLookup,
                         usedFontNames,
-                        visitedStreams);
+                        visitedStreams).ConfigureAwait(false);
                 }
             }
         }
 
-        private void ProcessAppearanceObject(
+        private async Task ProcessAppearanceObjectAsync(
             PdfObject? appearanceObject,
             int pageNumber,
             string context,
@@ -319,12 +321,12 @@ public static class PdfFontSubsetMerger
                         if (fontsDictionary != null && renameLookup.TryGetValue(fontsDictionary, out var renameMap))
                         {
                             var usageSet = GetUsageSet(fontsDictionary, usedFontNames);
-                            ProcessStream(stream, renameMap, usageSet, context);
+                            await ProcessStreamAsync(stream, renameMap, usageSet, context).ConfigureAwait(false);
                         }
 
                         if (options.IncludeFormXObjects)
                         {
-                            ProcessFormXObjects(resources, pageNumber, renameLookup, usedFontNames, visitedStreams);
+                            await ProcessFormXObjectsAsync(resources, pageNumber, renameLookup, usedFontNames, visitedStreams).ConfigureAwait(false);
                         }
                     }
 
@@ -332,33 +334,33 @@ public static class PdfFontSubsetMerger
                 case PdfDictionary dictionary:
                     foreach (var name in dictionary.KeySet())
                     {
-                        ProcessAppearanceObject(
+                        await ProcessAppearanceObjectAsync(
                             dictionary.Get(name),
                             pageNumber,
                             context,
                             renameLookup,
                             usedFontNames,
-                            visitedStreams);
+                            visitedStreams).ConfigureAwait(false);
                     }
 
                     break;
                 case PdfArray array:
                     for (var i = 0; i < array.Size(); i++)
                     {
-                        ProcessAppearanceObject(
+                        await ProcessAppearanceObjectAsync(
                             array.Get(i),
                             pageNumber,
                             context,
                             renameLookup,
                             usedFontNames,
-                            visitedStreams);
+                            visitedStreams).ConfigureAwait(false);
                     }
 
                     break;
             }
         }
 
-        private void ProcessStream(
+        private async Task ProcessStreamAsync(
             PdfStream stream,
             Dictionary<string, string> renameMap,
             HashSet<string> usageSet,
@@ -384,7 +386,7 @@ public static class PdfFontSubsetMerger
                 stream.SetData(updatedBytes);
             }
 
-            LogFontOperatorReplacements(context, replacements);
+            await LogFontOperatorReplacementsAsync(context, replacements).ConfigureAwait(false);
         }
 
         private static HashSet<string> GetUsageSet(
@@ -400,7 +402,7 @@ public static class PdfFontSubsetMerger
             return usageSet;
         }
 
-        private void LogFontOperatorReplacements(string context, List<FontOperatorReplacement> replacements)
+        private async Task LogFontOperatorReplacementsAsync(string context, List<FontOperatorReplacement> replacements)
         {
             if (replacements.Count == 0)
             {
@@ -414,11 +416,11 @@ public static class PdfFontSubsetMerger
             foreach (var group in groups)
             {
                 var message = $"Updated Tf operator from \"/{group.OldName}\" to \"/{group.NewName}\" in {context} ({group.Count} occurrence(s)).";
-                new FontMergeLogEvent(FontMergeLogEventId.TextOperatorUpdated, FontMergeLogLevel.Info, message).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.TextOperatorUpdated, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
             }
         }
 
-        private void RemoveUnusedFonts(
+        private async Task RemoveUnusedFontsAsync(
             Dictionary<PdfDictionary, Dictionary<string, string>> renameLookup,
             Dictionary<PdfDictionary, HashSet<string>> usedFontNames)
         {
@@ -440,7 +442,7 @@ public static class PdfFontSubsetMerger
 
                     fontsDictionary.Remove(name);
                     var message = $"Removed unused font resource \"/{value}\" from fonts dictionary.";
-                    new FontMergeLogEvent(FontMergeLogEventId.UnusedFontResourceRemoved, FontMergeLogLevel.Info, message).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.UnusedFontResourceRemoved, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
                 }
             }
         }
@@ -470,7 +472,7 @@ public static class PdfFontSubsetMerger
                 replacements.Add(replacement);
             }
 
-            public void Apply(IPdfCropLogger logger)
+            public async Task ApplyAsync(IPdfCropLogger logger)
             {
                 foreach (var replacement in replacements)
                 {
@@ -483,7 +485,7 @@ public static class PdfFontSubsetMerger
                         RenameMap[oldName.GetValue()] = newName.GetValue();
 
                         var message = $"Replaced font resource key \"/{oldName.GetValue()}\" with \"/{newName.GetValue()}\" for \"{replacement.CanonicalName}\".";
-                        new FontMergeLogEvent(FontMergeLogEventId.FontResourceKeyReplaced, FontMergeLogLevel.Info, message).Log(logger);
+                        await new FontMergeLogEvent(FontMergeLogEventId.FontResourceKeyReplaced, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
                     }
 
                     FontsDictionary.Put(newName, replacement.ReplacementObject);
@@ -1001,7 +1003,7 @@ public static class PdfFontSubsetMerger
             usageCollector = new ContentStreamFontUsageCollector(entries);
         }
 
-        public List<FontResourceEntry> Collect(PdfDocument pdfDocument)
+        public async Task<List<FontResourceEntry>> CollectAsync(PdfDocument pdfDocument)
         {
             var pageCount = pdfDocument.GetNumberOfPages();
 
@@ -1011,12 +1013,12 @@ public static class PdfFontSubsetMerger
                 var resources = page.GetResources()?.GetPdfObject() as PdfDictionary
                     ?? page.GetPdfObject()?.GetAsDictionary(PdfName.Resources);
 
-                CollectFromResources(resources, pageIndex);
+                await CollectFromResourcesAsync(resources, pageIndex).ConfigureAwait(false);
                 usageCollector.Collect(resources, page.GetContentBytes());
 
                 if (options.IncludeAnnotations)
                 {
-                    CollectFromAnnotations(page, pageIndex);
+                    await CollectFromAnnotationsAsync(page, pageIndex).ConfigureAwait(false);
                 }
             }
 
@@ -1026,13 +1028,13 @@ public static class PdfFontSubsetMerger
             {
                 var codesCount = entry.EncounteredCodes.Count;
                 var message = $"Collected {codesCount} glyph codes for font \"{entry.CanonicalName}\" (resource {entry.ResourceName.GetValue()}).";
-                new FontMergeLogEvent(FontMergeLogEventId.GlyphCodesCollected, FontMergeLogLevel.Info, message).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.GlyphCodesCollected, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
             }
 
             return result;
         }
 
-        private void CollectFromResources(PdfDictionary? resources, int pageNumber)
+        private async Task CollectFromResourcesAsync(PdfDictionary? resources, int pageNumber)
         {
             if (resources == null)
             {
@@ -1044,17 +1046,17 @@ public static class PdfFontSubsetMerger
             {
                 foreach (var fontName in fontsDictionary.KeySet())
                 {
-                    TryCreateEntry(fontsDictionary, fontName, pageNumber);
+                    await TryCreateEntryAsync(fontsDictionary, fontName, pageNumber).ConfigureAwait(false);
                 }
             }
 
             if (options.IncludeFormXObjects)
             {
-                CollectFromFormXObjects(resources, pageNumber);
+                await CollectFromFormXObjectsAsync(resources, pageNumber).ConfigureAwait(false);
             }
         }
 
-        private void TryCreateEntry(PdfDictionary fontsDictionary, PdfName fontName, int pageNumber)
+        private async Task TryCreateEntryAsync(PdfDictionary fontsDictionary, PdfName fontName, int pageNumber)
         {
             var fontDictionary = fontsDictionary.GetAsDictionary(fontName);
             if (fontDictionary == null)
@@ -1083,7 +1085,7 @@ public static class PdfFontSubsetMerger
             if (!options.IsSupportedFontSubtype(subtype))
             {
                 var skipMessage = $"Skipped subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} due to unsupported subtype \"{subtype}\".";
-                new FontMergeLogEvent(FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype, FontMergeLogLevel.Warning, skipMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype, FontMergeLogLevel.Warning, skipMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -1097,10 +1099,10 @@ public static class PdfFontSubsetMerger
             entries[key] = entry;
 
             var indexMessage = $"Indexed subset font \"{baseFontName}\" (resource {fontName.GetValue()}) on page {pageNumber} with canonical name \"{canonicalName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, indexMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetFontIndexed, FontMergeLogLevel.Info, indexMessage).LogAsync(logger).ConfigureAwait(false);
         }
 
-        private void CollectFromFormXObjects(PdfDictionary resources, int pageNumber)
+        private async Task CollectFromFormXObjectsAsync(PdfDictionary resources, int pageNumber)
         {
             var xObjects = resources.GetAsDictionary(PdfName.XObject);
             if (xObjects == null)
@@ -1130,12 +1132,12 @@ public static class PdfFontSubsetMerger
                 }
 
                 var nestedResources = stream.GetAsDictionary(PdfName.Resources);
-                CollectFromResources(nestedResources, pageNumber);
+                await CollectFromResourcesAsync(nestedResources, pageNumber).ConfigureAwait(false);
                 usageCollector.Collect(nestedResources, stream.GetBytes(true));
             }
         }
 
-        private void CollectFromAnnotations(PdfPage page, int pageNumber)
+        private async Task CollectFromAnnotationsAsync(PdfPage page, int pageNumber)
         {
             var pageDictionary = page.GetPdfObject();
             var annotations = pageDictionary?.GetAsArray(PdfName.Annots);
@@ -1161,12 +1163,12 @@ public static class PdfFontSubsetMerger
                 foreach (var name in appearanceDictionary.KeySet())
                 {
                     var appearanceObject = appearanceDictionary.Get(name);
-                    CollectFromAppearanceObject(appearanceObject, pageNumber);
+                    await CollectFromAppearanceObjectAsync(appearanceObject, pageNumber).ConfigureAwait(false);
                 }
             }
         }
 
-        private void CollectFromAppearanceObject(PdfObject? appearanceObject, int pageNumber)
+        private async Task CollectFromAppearanceObjectAsync(PdfObject? appearanceObject, int pageNumber)
         {
             if (appearanceObject == null)
             {
@@ -1184,20 +1186,20 @@ public static class PdfFontSubsetMerger
                     }
 
                     var resources = stream.GetAsDictionary(PdfName.Resources);
-                    CollectFromResources(resources, pageNumber);
+                    await CollectFromResourcesAsync(resources, pageNumber).ConfigureAwait(false);
                     usageCollector.Collect(resources, stream.GetBytes(true));
                     break;
                 case PdfDictionary dictionary:
                     foreach (var name in dictionary.KeySet())
                     {
-                        CollectFromAppearanceObject(dictionary.Get(name), pageNumber);
+                        await CollectFromAppearanceObjectAsync(dictionary.Get(name), pageNumber).ConfigureAwait(false);
                     }
 
                     break;
                 case PdfArray array:
                     for (var i = 0; i < array.Size(); i++)
                     {
-                        CollectFromAppearanceObject(array.Get(i), pageNumber);
+                        await CollectFromAppearanceObjectAsync(array.Get(i), pageNumber).ConfigureAwait(false);
                     }
 
                     break;
@@ -1225,7 +1227,7 @@ public static class PdfFontSubsetMerger
 
     private static class FontCompatibilityAnalyzer
     {
-        public static List<List<FontResourceEntry>> Split(List<FontResourceEntry> fonts, IPdfCropLogger logger)
+        public static async Task<List<List<FontResourceEntry>>> SplitAsync(List<FontResourceEntry> fonts, IPdfCropLogger logger)
         {
             var clusters = new List<List<FontResourceEntry>>();
             foreach (var font in fonts)
@@ -1251,7 +1253,7 @@ public static class PdfFontSubsetMerger
             {
                 var canonicalName = fonts[0].CanonicalName;
                 var message = $"Split {fonts.Count} subset fonts for \"{canonicalName}\" into {clusters.Count} clusters due to incompatible ToUnicode maps or metrics.";
-                new FontMergeLogEvent(FontMergeLogEventId.FontClustersSplit, FontMergeLogLevel.Info, message).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontClustersSplit, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
             }
 
             return clusters;
@@ -2469,7 +2471,7 @@ public static class PdfFontSubsetMerger
 
     private interface IFontSubsetMerger
     {
-        void Merge(IReadOnlyList<FontResourceEntry> fonts);
+        Task MergeAsync(IReadOnlyList<FontResourceEntry> fonts);
     }
 
     private static class FontSubsetMergerFactory
@@ -2520,7 +2522,7 @@ public static class PdfFontSubsetMerger
             this.logger = logger;
         }
 
-        public void Merge(IReadOnlyList<FontResourceEntry> fonts)
+        public async Task MergeAsync(IReadOnlyList<FontResourceEntry> fonts)
         {
             if (fonts.Count == 0)
             {
@@ -2531,14 +2533,14 @@ public static class PdfFontSubsetMerger
             SubsetFontDictionaryCleaner.CleanTrueType(context.Canonical.FontDictionary);
 
             var prepareMessage = $"Prepared TrueType subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
-            new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).LogAsync(logger).ConfigureAwait(false);
 
-            MergeWidths(context);
-            MergeToUnicode(context);
-            MergeFontFile(context);
+            await MergeWidthsAsync(context).ConfigureAwait(false);
+            await MergeToUnicodeAsync(context).ConfigureAwait(false);
+            await MergeFontFileAsync(context).ConfigureAwait(false);
         }
 
-        private void MergeWidths(FontSubsetMergeContext context)
+        private async Task MergeWidthsAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var glyphs = context.Glyphs;
@@ -2556,7 +2558,7 @@ public static class PdfFontSubsetMerger
                 canonical.FontDictionary.Remove(PdfName.Widths);
 
                 var emptyMessage = $"No glyph widths available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2578,7 +2580,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = entry.BuildWidthConflictDescription();
                     var warning = $"Width conflict for glyph code {code} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
-                    new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
@@ -2588,10 +2590,10 @@ public static class PdfFontSubsetMerger
             fontDictionary.Put(PdfName.Widths, widthsArray);
 
             var mergeMessage = $"Merged {ordered.Count} glyph widths for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
         }
 
-        private void MergeToUnicode(FontSubsetMergeContext context)
+        private async Task MergeToUnicodeAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var glyphs = context.Glyphs;
@@ -2610,7 +2612,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildUnicodeConflictDescription();
                     var warning = $"Unicode conflict for glyph code {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
-                    new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
@@ -2618,7 +2620,7 @@ public static class PdfFontSubsetMerger
             {
                 canonical.FontDictionary.Remove(PdfName.ToUnicode);
                 var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2626,10 +2628,10 @@ public static class PdfFontSubsetMerger
             canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
 
             var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
         }
 
-        private void MergeFontFile(FontSubsetMergeContext context)
+        private async Task MergeFontFileAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var (sourceStream, sourceName) = FontDescriptorUtilities.GetPreferredFontFile2(context.Fonts);
@@ -2637,7 +2639,7 @@ public static class PdfFontSubsetMerger
             if (descriptor == null)
             {
                 var message = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
-                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, message).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2661,7 +2663,7 @@ public static class PdfFontSubsetMerger
             var resultMessage = sourceStream != null
                 ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
                 : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).LogAsync(logger).ConfigureAwait(false);
         }
     }
 
@@ -2674,7 +2676,7 @@ public static class PdfFontSubsetMerger
             this.logger = logger;
         }
 
-        public void Merge(IReadOnlyList<FontResourceEntry> fonts)
+        public async Task MergeAsync(IReadOnlyList<FontResourceEntry> fonts)
         {
             if (fonts.Count == 0)
             {
@@ -2685,14 +2687,14 @@ public static class PdfFontSubsetMerger
             SubsetFontDictionaryCleaner.CleanType0(context.Canonical.FontDictionary);
 
             var prepareMessage = $"Prepared Type0 subset merge for \"{context.Canonical.CanonicalName}\" with {fonts.Count} entries.";
-            new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.SubsetMergePrepared, FontMergeLogLevel.Info, prepareMessage).LogAsync(logger).ConfigureAwait(false);
 
-            MergeWidths(context);
-            MergeToUnicode(context);
-            MergeFontFile(context);
+            await MergeWidthsAsync(context).ConfigureAwait(false);
+            await MergeToUnicodeAsync(context).ConfigureAwait(false);
+            await MergeFontFileAsync(context).ConfigureAwait(false);
         }
 
-        private void MergeWidths(FontSubsetMergeContext context)
+        private async Task MergeWidthsAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var resourceName = context.CanonicalResourceName;
@@ -2702,7 +2704,7 @@ public static class PdfFontSubsetMerger
             if (cidFont == null)
             {
                 var message = $"Skipped width merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
-                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, message).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, message).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2715,7 +2717,7 @@ public static class PdfFontSubsetMerger
             {
                 cidFont.Remove(PdfName.W);
                 var emptyMessage = $"No CID widths available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, emptyMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2754,7 +2756,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildWidthConflictDescription();
                     var warning = $"Width conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using {width.ToString(CultureInfo.InvariantCulture)}.";
-                    new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Warning, warning).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
@@ -2762,7 +2764,7 @@ public static class PdfFontSubsetMerger
             cidFont.Put(PdfName.W, widthsArray);
 
             var mergeMessage = $"Merged {ordered.Count} CID widths for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.FontWidthsMergeStatus, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
         }
 
         private static void AppendWidthRange(PdfArray target, int startCode, List<float> widths)
@@ -2782,7 +2784,7 @@ public static class PdfFontSubsetMerger
             target.Add(array);
         }
 
-        private void MergeToUnicode(FontSubsetMergeContext context)
+        private async Task MergeToUnicodeAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var glyphs = context.Glyphs;
@@ -2801,7 +2803,7 @@ public static class PdfFontSubsetMerger
                 {
                     var conflict = pair.Value.BuildUnicodeConflictDescription();
                     var warning = $"Unicode conflict for CID {pair.Key} while merging \"{canonical.CanonicalName}\": {conflict}. Using \"{unicode}\".";
-                    new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).Log(logger);
+                    await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Warning, warning).LogAsync(logger).ConfigureAwait(false);
                 }
             }
 
@@ -2809,7 +2811,7 @@ public static class PdfFontSubsetMerger
             {
                 canonical.FontDictionary.Remove(PdfName.ToUnicode);
                 var emptyMessage = $"No ToUnicode entries available for \"{canonical.CanonicalName}\".";
-                new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, emptyMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2817,17 +2819,17 @@ public static class PdfFontSubsetMerger
             canonical.FontDictionary.Put(PdfName.ToUnicode, stream);
 
             var mergeMessage = $"Merged ToUnicode map with {unicodeMap.Count} entries for \"{canonical.CanonicalName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.ToUnicodeMergeStatus, FontMergeLogLevel.Info, mergeMessage).LogAsync(logger).ConfigureAwait(false);
         }
 
-        private void MergeFontFile(FontSubsetMergeContext context)
+        private async Task MergeFontFileAsync(FontSubsetMergeContext context)
         {
             var canonical = context.Canonical;
             var cidFont = FontDescriptorUtilities.GetCidFontDictionary(canonical.FontDictionary);
             if (cidFont == null)
             {
                 var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because CID font dictionary is missing.";
-                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2835,7 +2837,7 @@ public static class PdfFontSubsetMerger
             if (descriptor == null)
             {
                 var skipMessage = $"Skipped FontFile2 merge for \"{canonical.CanonicalName}\" because font descriptor is missing.";
-                new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).Log(logger);
+                await new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, skipMessage).LogAsync(logger).ConfigureAwait(false);
                 return;
             }
 
@@ -2861,7 +2863,7 @@ public static class PdfFontSubsetMerger
             var resultMessage = sourceStream != null
                 ? $"Assigned shared FontFile2 from resource {sourceName} for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\"."
                 : $"Removed FontFile2 for \"{canonical.CanonicalName}\" and updated font name to \"{newName}\".";
-            new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).Log(logger);
+            await new FontMergeLogEvent(FontMergeLogEventId.FontFileMergeStatus, FontMergeLogLevel.Info, resultMessage).LogAsync(logger).ConfigureAwait(false);
         }
     }
 

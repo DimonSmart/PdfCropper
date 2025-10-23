@@ -59,7 +59,7 @@ internal static class ContentBasedCroppingStrategy
     /// <param name="ct">Cancellation token.</param>
     /// <param name="ignoredObjects">Set of content keys to exclude from bounds calculation.</param>
     /// <returns>The crop rectangle, or null if no content found.</returns>
-    public static Rectangle? CropPage(
+    public static async Task<Rectangle?> CropPageAsync(
         PdfPage page,
         IPdfCropLogger logger,
         int pageIndex,
@@ -76,7 +76,7 @@ internal static class ContentBasedCroppingStrategy
             return null;
         }
 
-        logger.LogInfo($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})");
+        await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
 
         return bounds.Value.ToRectangle(page.GetPageSize(), margin);
     }

@@ -36,27 +36,27 @@ internal static class BitmapBasedCroppingStrategy
     [SupportedOSPlatform("android31.0")]
     [SupportedOSPlatform("ios13.6")]
     [SupportedOSPlatform("maccatalyst13.5")]
-    public static Rectangle? CropPage(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, float margin, CancellationToken ct)
+    public static async Task<Rectangle?> CropPageAsync(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, float margin, CancellationToken ct)
     {
         const byte threshold = 250;
 
         try
         {
-            logger.LogInfo($"Page {pageIndex}: Rendering to bitmap");
+            await logger.LogInfoAsync($"Page {pageIndex}: Rendering to bitmap").ConfigureAwait(false);
 
             using var bitmap = Conversion.ToImage(inputPdf, page: pageIndex - 1);
 
-            logger.LogInfo($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels");
+            await logger.LogInfoAsync($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels").ConfigureAwait(false);
 
             var (minX, minY, maxX, maxY) = FindContentBoundsInBitmap(bitmap, threshold, ct);
 
             if (minX >= maxX || minY >= maxY)
             {
-                logger.LogWarning($"Page {pageIndex}: No content found in bitmap");
+                await logger.LogWarningAsync($"Page {pageIndex}: No content found in bitmap").ConfigureAwait(false);
                 return null;
             }
 
-            logger.LogInfo($"Page {pageIndex}: Content pixels = ({minX}, {minY}) to ({maxX}, {maxY})");
+            await logger.LogInfoAsync($"Page {pageIndex}: Content pixels = ({minX}, {minY}) to ({maxX}, {maxY})").ConfigureAwait(false);
             var scaleX = pageSize.GetWidth() / bitmap.Width;
             var scaleY = pageSize.GetHeight() / bitmap.Height;
 
@@ -78,13 +78,13 @@ internal static class BitmapBasedCroppingStrategy
                 return null;
             }
 
-            logger.LogInfo($"Page {pageIndex}: PDF coordinates = ({left:F2}, {bottom:F2}, {width:F2}, {height:F2})");
+            await logger.LogInfoAsync($"Page {pageIndex}: PDF coordinates = ({left:F2}, {bottom:F2}, {width:F2}, {height:F2})").ConfigureAwait(false);
 
             return new Rectangle((float)left, (float)bottom, (float)width, (float)height);
         }
         catch (Exception ex)
         {
-            logger.LogError($"Page {pageIndex}: Bitmap rendering failed: {ex.Message}");
+            await logger.LogErrorAsync($"Page {pageIndex}: Bitmap rendering failed: {ex.Message}").ConfigureAwait(false);
             throw;
         }
     }
