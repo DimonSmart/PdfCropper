@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>itext.pdfoptimizer</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net461</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup />
+  <ItemGroup />
+  <ItemGroup>
+    <Reference Include="itext.kernel" />
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <Reference Include="itext.commons" />
+    <Reference Include="itext.io" />
+    <Reference Include="System.Core" />
+  </ItemGroup>
+</Project>
