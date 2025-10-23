@@ -156,6 +156,73 @@ public class PdfFontSubsetMergerTests
         Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontSkippedDueToUnsupportedSubtype && e.Level == TestPdfLogger.WarningLevel);
     }
 
+    [Fact]
+    public async Task MergeDuplicateSubsets_AlternativeSubsetFormat_DetectsAndMerges()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new PdfWriter(stream))
+        {
+            writer.SetCloseStream(false);
+            using var doc = new PdfDocument(writer);
+            var page = doc.AddNewPage();
+
+            var font = PdfFontFactory.CreateFont(GetFontPath(), PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED);
+
+            var calibri1Name = new PdfName("Calibri-0-75");
+            var calibri2Name = new PdfName("Calibri-1-50");
+
+            var fontDict1 = CreateAlternativeSubsetFontDictionary(font, "Calibri-0-75");
+            var fontDict2 = CreateAlternativeSubsetFontDictionary(font, "Calibri-1-50");
+
+            var resources = page.GetResources().GetPdfObject();
+            var fontsDict = resources.GetAsDictionary(PdfName.Font);
+            if (fontsDict == null)
+            {
+                fontsDict = new PdfDictionary();
+                resources.Put(PdfName.Font, fontsDict);
+            }
+
+            fontsDict.Put(calibri1Name, fontDict1);
+            fontsDict.Put(calibri2Name, fontDict2);
+
+            var canvas = new PdfCanvas(page);
+            canvas.BeginText()
+                .SetFontAndSize(font, 12)
+                .MoveText(100, 700)
+                .ShowText("ABC")
+                .EndText();
+
+            canvas.BeginText()
+                .SetFontAndSize(font, 12)
+                .MoveText(100, 680)
+                .ShowText("DEF")
+                .EndText();
+        }
+
+        stream.Position = 0;
+        var logger = new TestPdfLogger();
+        var merged = await MergeAsync(stream.ToArray(), FontSubsetMergeOptions.CreateDefault(), logger);
+
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("Calibri-0-75", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("Calibri-1-50", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, e => e.Id == FontMergeLogEventId.SubsetFontIndexed && e.Message.Contains("\"Calibri\"", StringComparison.Ordinal));
+    }
+
+    private static PdfDictionary CreateAlternativeSubsetFontDictionary(PdfFont sourceFont, string baseFontName)
+    {
+        var sourceFontDict = sourceFont.GetPdfObject();
+        var newFontDict = new PdfDictionary();
+        
+        foreach (var key in sourceFontDict.KeySet())
+        {
+            newFontDict.Put(key, sourceFontDict.Get(key));
+        }
+        
+        newFontDict.Put(PdfName.BaseFont, new PdfName(baseFontName));
+        
+        return newFontDict;
+    }
+
     [Theory]
     [MemberData(nameof(MergeDuplicateSubsetsAfterMergingDocumentsData))]
     public async Task MergeDuplicateSubsets_AfterMergingDocuments_DeduplicatesFontObjects(
@@ -890,4 +957,160 @@ public sealed class TestPdfLogger : IPdfCropLogger
     }
 
     public readonly record struct LogEvent(FontMergeLogEventId? Id, string Level, string Message);
+}
+
+public class FontNameUtilitiesTests
+{
+    [Theory]
+    [InlineData("ABCDEF+TimesRoman", true)]
+    [InlineData("GHIJKL+Calibri", true)]
+    [InlineData("ABC+Font", true)]
+    [InlineData("Calibri-0-75", true)]
+    [InlineData("Calibri-1-50", true)]
+    [InlineData("TableauBook-0-50", true)]
+    [InlineData("TableauMedium-0-50", true)]
+    [InlineData("Calibri", false)]
+    [InlineData("Calibri-Bold", false)]
+    [InlineData("Calibri-0", false)]
+    [InlineData("Calibri-0-", false)]
+    [InlineData("-0-50", false)]
+    [InlineData("Font-a-50", false)]
+    [InlineData("Font-0-b", false)]
+    [InlineData("", false)]
+    public void IsSubsetFont_DetectsCorrectFormats(string? baseFontName, bool expected)
+    {
+        var isSubset = TestFontNameUtilities.IsSubsetFont(baseFontName!);
+        Assert.Equal(expected, isSubset);
+    }
+
+    [Fact]
+    public void IsSubsetFont_NullInput_ReturnsFalse()
+    {
+        var isSubset = TestFontNameUtilities.IsSubsetFont(null!);
+        Assert.False(isSubset);
+    }
+
+    [Theory]
+    [InlineData("ABCDEF+TimesRoman", "TimesRoman")]
+    [InlineData("GHIJKL+Calibri", "Calibri")]
+    [InlineData("Calibri-0-75", "Calibri")]
+    [InlineData("Calibri-1-50", "Calibri")]
+    [InlineData("TableauBook-0-50", "TableauBook")]
+    [InlineData("TableauMedium-0-50", "TableauMedium")]
+    [InlineData("Calibri", "Calibri")]
+    [InlineData("Calibri-Bold", "Calibri-Bold")]
+    public void GetCanonicalName_ExtractsCorrectName(string? baseFontName, string? expected)
+    {
+        var canonical = TestFontNameUtilities.GetCanonicalName(baseFontName!);
+        Assert.Equal(expected, canonical);
+    }
+
+    [Fact]
+    public void GetCanonicalName_EmptyInput_ReturnsNull()
+    {
+        var canonical = TestFontNameUtilities.GetCanonicalName("");
+        Assert.Null(canonical);
+    }
+
+    [Fact]
+    public void GetCanonicalName_NullInput_ReturnsNull()
+    {
+        var canonical = TestFontNameUtilities.GetCanonicalName(null!);
+        Assert.Null(canonical);
+    }
+}
+
+internal static class TestFontNameUtilities
+{
+    public static bool IsSubsetFont(string baseFontName)
+    {
+        if (string.IsNullOrEmpty(baseFontName))
+        {
+            return false;
+        }
+
+        if (IsStandardSubsetFormat(baseFontName))
+        {
+            return true;
+        }
+
+        return IsAlternativeSubsetFormat(baseFontName);
+    }
+
+    private static bool IsStandardSubsetFormat(string baseFontName)
+    {
+        var plusIndex = baseFontName.IndexOf('+');
+        if (plusIndex <= 0 || plusIndex >= baseFontName.Length - 1)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < plusIndex; i++)
+        {
+            if (!char.IsUpper(baseFontName[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAlternativeSubsetFormat(string baseFontName)
+    {
+        var lastDashIndex = baseFontName.LastIndexOf('-');
+        if (lastDashIndex <= 0 || lastDashIndex >= baseFontName.Length - 1)
+        {
+            return false;
+        }
+
+        for (var i = lastDashIndex + 1; i < baseFontName.Length; i++)
+        {
+            if (!char.IsDigit(baseFontName[i]))
+            {
+                return false;
+            }
+        }
+
+        var penultimateDashIndex = baseFontName.LastIndexOf('-', lastDashIndex - 1);
+        if (penultimateDashIndex <= 0)
+        {
+            return false;
+        }
+
+        for (var i = penultimateDashIndex + 1; i < lastDashIndex; i++)
+        {
+            if (!char.IsDigit(baseFontName[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static string? GetCanonicalName(string baseFontName)
+    {
+        if (string.IsNullOrEmpty(baseFontName))
+        {
+            return null;
+        }
+
+        var plusIndex = baseFontName.IndexOf('+');
+        if (plusIndex > 0 && plusIndex < baseFontName.Length - 1)
+        {
+            return baseFontName[(plusIndex + 1)..];
+        }
+
+        if (IsAlternativeSubsetFormat(baseFontName))
+        {
+            var penultimateDashIndex = baseFontName.LastIndexOf('-', baseFontName.LastIndexOf('-') - 1);
+            if (penultimateDashIndex > 0)
+            {
+                return baseFontName[..penultimateDashIndex];
+            }
+        }
+
+        return baseFontName;
+    }
 }

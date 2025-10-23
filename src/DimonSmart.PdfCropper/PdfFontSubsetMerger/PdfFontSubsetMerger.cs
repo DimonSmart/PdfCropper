@@ -3434,6 +3434,16 @@ public static class PdfFontSubsetMerger
                 return false;
             }
 
+            if (IsStandardSubsetFormat(baseFontName))
+            {
+                return true;
+            }
+
+            return IsAlternativeSubsetFormat(baseFontName);
+        }
+
+        private static bool IsStandardSubsetFormat(string baseFontName)
+        {
             var plusIndex = baseFontName.IndexOf('+');
             if (plusIndex <= 0 || plusIndex >= baseFontName.Length - 1)
             {
@@ -3443,6 +3453,39 @@ public static class PdfFontSubsetMerger
             for (var i = 0; i < plusIndex; i++)
             {
                 if (!char.IsUpper(baseFontName[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsAlternativeSubsetFormat(string baseFontName)
+        {
+            var lastDashIndex = baseFontName.LastIndexOf('-');
+            if (lastDashIndex <= 0 || lastDashIndex >= baseFontName.Length - 1)
+            {
+                return false;
+            }
+
+            for (var i = lastDashIndex + 1; i < baseFontName.Length; i++)
+            {
+                if (!char.IsDigit(baseFontName[i]))
+                {
+                    return false;
+                }
+            }
+
+            var penultimateDashIndex = baseFontName.LastIndexOf('-', lastDashIndex - 1);
+            if (penultimateDashIndex <= 0)
+            {
+                return false;
+            }
+
+            for (var i = penultimateDashIndex + 1; i < lastDashIndex; i++)
+            {
+                if (!char.IsDigit(baseFontName[i]))
                 {
                     return false;
                 }
@@ -3462,6 +3505,15 @@ public static class PdfFontSubsetMerger
             if (plusIndex > 0 && plusIndex < baseFontName.Length - 1)
             {
                 return baseFontName[(plusIndex + 1)..];
+            }
+
+            if (IsAlternativeSubsetFormat(baseFontName))
+            {
+                var penultimateDashIndex = baseFontName.LastIndexOf('-', baseFontName.LastIndexOf('-') - 1);
+                if (penultimateDashIndex > 0)
+                {
+                    return baseFontName[..penultimateDashIndex];
+                }
             }
 
             return baseFontName;
