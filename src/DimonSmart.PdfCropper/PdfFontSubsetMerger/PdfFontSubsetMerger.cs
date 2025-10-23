@@ -127,7 +127,8 @@ public static class PdfFontSubsetMerger
                             duplicate.ResourceName,
                             canonical.ResourceName,
                             replacementObject,
-                            canonical.CanonicalName));
+                            canonical.CanonicalName,
+                            duplicate.FontDictionary));
                     }
 
                     var mergeMessage = $"Merged {cluster.Count} subset fonts for \"{canonical.CanonicalName}\" (canonical: {canonical.ResourceName.GetValue()}, duplicates replaced: {duplicateCount}).";
@@ -197,6 +198,7 @@ public static class PdfFontSubsetMerger
             }
 
             await RemoveUnusedFontsAsync(renameLookup, usedFontNames).ConfigureAwait(false);
+            ReleaseOriginalFontDictionaries(replacements);
         }
 
         private async Task ProcessPageContentAsync(
@@ -496,12 +498,116 @@ public static class PdfFontSubsetMerger
             }
         }
 
+        private static void ReleaseOriginalFontDictionaries(IEnumerable<FontResourceReplacement> replacements)
+        {
+            var visited = new HashSet<PdfObject>(ReferenceEqualityComparer.Instance);
+            foreach (var replacement in replacements)
+            {
+                var original = replacement.OriginalFontDictionary;
+                if (ReferenceEquals(original, replacement.ReplacementObject))
+                {
+                    continue;
+                }
+
+                ReleaseFontDictionary(original, visited);
+            }
+        }
+
+        private static void ReleaseFontDictionary(PdfDictionary? dictionary, HashSet<PdfObject> visited)
+        {
+            if (dictionary == null)
+            {
+                return;
+            }
+
+            if (!visited.Add(dictionary))
+            {
+                return;
+            }
+
+            var descriptor = dictionary.GetAsDictionary(PdfName.FontDescriptor);
+            if (descriptor != null)
+            {
+                ReleaseFontDescriptor(descriptor, visited);
+            }
+
+            var descendants = dictionary.GetAsArray(PdfName.DescendantFonts);
+            if (descendants != null)
+            {
+                ReleaseDescendantFonts(descendants, visited);
+            }
+
+            var toUnicode = dictionary.GetAsStream(PdfName.ToUnicode);
+            if (toUnicode != null)
+            {
+                ReleaseStream(toUnicode, visited);
+            }
+
+            dictionary.GetIndirectReference()?.SetFree();
+        }
+
+        private static void ReleaseDescendantFonts(PdfArray array, HashSet<PdfObject> visited)
+        {
+            if (!visited.Add(array))
+            {
+                return;
+            }
+
+            for (var i = 0; i < array.Size(); i++)
+            {
+                var item = array.Get(i);
+                switch (item)
+                {
+                    case PdfStream stream:
+                        ReleaseStream(stream, visited);
+                        break;
+                    case PdfDictionary nestedDictionary:
+                        ReleaseFontDictionary(nestedDictionary, visited);
+                        break;
+                    case PdfArray nestedArray:
+                        ReleaseDescendantFonts(nestedArray, visited);
+                        break;
+                }
+            }
+
+            array.GetIndirectReference()?.SetFree();
+        }
+
+        private static void ReleaseFontDescriptor(PdfDictionary descriptor, HashSet<PdfObject> visited)
+        {
+            if (!visited.Add(descriptor))
+            {
+                return;
+            }
+
+            ReleaseStream(descriptor.GetAsStream(PdfName.FontFile), visited);
+            ReleaseStream(descriptor.GetAsStream(PdfName.FontFile2), visited);
+            ReleaseStream(descriptor.GetAsStream(PdfName.FontFile3), visited);
+            descriptor.GetIndirectReference()?.SetFree();
+        }
+
+        private static void ReleaseStream(PdfStream? stream, HashSet<PdfObject> visited)
+        {
+            if (stream == null)
+            {
+                return;
+            }
+
+            if (!visited.Add(stream))
+            {
+                return;
+            }
+
+            stream.GetIndirectReference()?.SetFree();
+        }
+
         private readonly record struct FontResourceReplacement(
             PdfDictionary FontsDictionary,
             PdfName OldName,
             PdfName NewName,
             PdfObject ReplacementObject,
-            string CanonicalName);
+            string CanonicalName,
+            PdfDictionary OriginalFontDictionary);
 
         private sealed class FontDictionaryUpdateInfo
         {
