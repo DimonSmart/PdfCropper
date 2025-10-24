@@ -1108,7 +1108,7 @@ public class PdfFontOptimizer
         Dictionary<string, string> mappingTable,
         Dictionary<string, Dictionary<(int, string, int), int>> fontCidRemappings)
     {
-        Console.WriteLine("\n=== Applying Global Font Dictionary ===");
+        Console.WriteLine("\n=== Applying Global Font Dictionary with CID Remapping ===");
 
         int totalReplacements = 0;
         var replacementStats = new Dictionary<string, int>();
@@ -1123,6 +1123,7 @@ public class PdfFontOptimizer
             var originalFontsDict = resources.GetPdfObject().GetAsDictionary(PdfName.Font);
             if (originalFontsDict != null)
             {
+                Console.WriteLine($"Page {pageNum}: Replacing font dictionary (was {originalFontsDict.Size()} fonts, now {globalFontDict.Size()} merged fonts)");
                 resources.GetPdfObject().Put(PdfName.Font, globalFontDict);
             }
 
@@ -1149,7 +1150,15 @@ public class PdfFontOptimizer
             }
         }
 
-        Console.WriteLine($"\n✅ Total replacements: {totalReplacements}");
+        Console.WriteLine($"\n📊 Font replacement statistics:");
+        Console.WriteLine($"Total font+CID references updated: {totalReplacements}");
+        
+        foreach (var stat in replacementStats.OrderBy(s => s.Key))
+        {
+            Console.WriteLine($"  {stat.Key}: {stat.Value} replacements");
+        }
+
+        Console.WriteLine($"\n✅ Global font dictionary with CID remapping applied to all pages!");
     }
 
     private int UpdatePageContentStream(PdfPage page, int pageNum, Dictionary<string, string> mappingTable, Dictionary<string, int> stats)
