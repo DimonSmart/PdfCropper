@@ -1,6 +1,8 @@
 using NUnit.Framework;
 using DimonSmart.PdfCropper.FontExperiments;
 using iText.Kernel.Pdf;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DimonSmart.PdfCropper.FontExperiments.Tests;
 
@@ -604,5 +606,281 @@ public class PdfFontOptimizerTests
                 }
             }
         }
+    }
+
+    [Test]
+    public void TestToUnicodeMerging()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        
+        var optimizer = new PdfFontOptimizer(testPdfPath);
+        optimizer.IndexFonts();
+        
+        var mapping = optimizer.CreateFontMappingTable();
+        
+        Console.WriteLine("\n=== Testing ToUnicode Merging ===\n");
+        
+        // Группируем контексты по базовому шрифту для теста
+        var calibriContexts = new List<PdfFontOptimizer.FontContext>();
+        
+        for (int page = 1; page <= 4; page++)
+        {
+            var fonts = optimizer.GetPageFonts(page);
+            foreach (var font in fonts.Where(f => f.BaseFontName == "Calibri"))
+            {
+                calibriContexts.Add(new PdfFontOptimizer.FontContext
+                {
+                    PageNumber = page,
+                    ResourceName = font.ResourceName,
+                    ActualFontName = font.BaseFontName,
+                    FontDict = font.FontDict,
+                    FontsDict = font.FontsDict
+                });
+            }
+        }
+        
+        Console.WriteLine($"Found {calibriContexts.Count} Calibri font contexts on pages 1-4");
+        
+        // Вызываем метод объединения ToUnicode
+        var mergedToUnicode = optimizer.TestMergeToUnicodeMappings(calibriContexts, "Calibri");
+        
+        Assert.That(mergedToUnicode, Is.Not.Null, "Merged ToUnicode should be created");
+        
+        // Проверяем содержимое
+        var mergedCmapData = mergedToUnicode.GetBytes();
+        var mergedCmapString = System.Text.Encoding.UTF8.GetString(mergedCmapData);
+        
+        Console.WriteLine("\n=== Checking Critical Characters in Merged ToUnicode ===");
+        
+        // Проверяем критические символы
+        var criticalChars = new Dictionary<string, string>
+        {
+            { "0041", "A" }, // Capital A
+            { "0052", "R" }, // Capital R  
+            { "0032", "2" }, // Digit 2
+            { "0035", "5" }, // Digit 5
+            { "002D", "-" }  // Hyphen
+        };
+        
+        int foundCount = 0;
+        foreach (var kvp in criticalChars)
+        {
+            if (mergedCmapString.Contains($"<{kvp.Key}>"))
+            {
+                Console.WriteLine($"  ✅ U+{kvp.Key} ({kvp.Value}) found in merged ToUnicode");
+                foundCount++;
+            }
+            else
+            {
+                Console.WriteLine($"  ❌ U+{kvp.Key} ({kvp.Value}) NOT found in merged ToUnicode");
+            }
+        }
+        
+        Assert.That(foundCount, Is.EqualTo(5), $"All 5 critical characters should be found in merged ToUnicode, but only {foundCount} found");
+        
+        Console.WriteLine($"\n✅ All {foundCount}/5 critical characters found in merged ToUnicode!");
+        
+        optimizer.Close();
+    }
+
+    [Test]
+    public void TestCidRemapping()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        
+        var optimizer = new PdfFontOptimizer(testPdfPath);
+        optimizer.IndexFonts();
+        
+        var stats = optimizer.GetFontStatistics();
+        Assert.That(stats.ContainsKey("Calibri"), Is.True, "Calibri font should exist");
+        
+        var calibriContexts = new List<PdfFontOptimizer.FontContext>();
+        var document = optimizer.GetDocument();
+        
+        for (int pageNum = 1; pageNum <= Math.Min(4, optimizer.GetPageCount()); pageNum++)
+        {
+            var page = document.GetPage(pageNum);
+            var resources = page.GetPdfObject().GetAsDictionary(PdfName.Resources);
+            var fonts = resources?.GetAsDictionary(PdfName.Font);
+            
+            if (fonts != null)
+            {
+                foreach (var fontEntry in fonts.EntrySet())
+                {
+                    var resourceName = fontEntry.Key.GetValue();
+                    var fontDict = fontEntry.Value as PdfDictionary;
+                    
+                    if (fontDict != null)
+                    {
+                        var baseFont = fontDict.GetAsName(PdfName.BaseFont)?.GetValue() ?? "";
+                        
+                        if (baseFont.Contains("Calibri"))
+                        {
+                            var context = new PdfFontOptimizer.FontContext
+                            {
+                                PageNumber = pageNum,
+                                ResourceName = resourceName,
+                                FontDict = fontDict
+                            };
+                            calibriContexts.Add(context);
+                            Console.WriteLine($"Found {baseFont} on page {pageNum} as {resourceName}");
+                        }
+                    }
+                }
+            }
+        }
+        
+        Assert.That(calibriContexts.Count, Is.GreaterThan(0), "Should find Calibri fonts on pages 1-4");
+        Console.WriteLine($"\n=== Testing CID Remapping ===");
+        Console.WriteLine($"Found {calibriContexts.Count} Calibri font contexts on pages 1-4");
+        
+        var remapper = new PdfFontOptimizer.CidRemapper();
+        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(calibriContexts);
+        
+        Console.WriteLine($"\n=== CID Remapping Results ===");
+        Console.WriteLine($"Original mappings with conflicts: {cidRemapping.Count}");
+        Console.WriteLine($"Unique CIDs after remapping: {mergedToUnicode.Count}");
+        
+        var criticalChars = new Dictionary<string, char>
+        {
+            { "0041", 'A' },
+            { "0052", 'R' },
+            { "0032", '2' },
+            { "0035", '5' },
+            { "002D", '-' }
+        };
+        
+        Console.WriteLine($"\n=== Critical Characters Mapping ===");
+        foreach (var kvp in criticalChars)
+        {
+            var unicode = kvp.Key;
+            var ch = kvp.Value;
+            var cid = mergedToUnicode.FirstOrDefault(m => m.Value.Equals(unicode, StringComparison.OrdinalIgnoreCase)).Key;
+            
+            if (cid > 0)
+            {
+                Console.WriteLine($"  ✅ U+{unicode} ({ch}) → CID 0x{cid:X4}");
+            }
+            else
+            {
+                Console.WriteLine($"  ❌ U+{unicode} ({ch}) → NOT FOUND");
+            }
+            
+            Assert.That(cid, Is.GreaterThan(0), $"Unicode {unicode} should have a CID assigned");
+        }
+        
+        var uniqueNewCids = cidRemapping.Values.Distinct().Count();
+        Console.WriteLine($"\n=== Remapping Statistics ===");
+        Console.WriteLine($"Unique new CIDs used: {uniqueNewCids}");
+        Console.WriteLine($"Total remapping entries: {cidRemapping.Count}");
+        
+        Assert.That(mergedToUnicode.Count, Is.EqualTo(uniqueNewCids), 
+            "Each Unicode character should map to exactly one CID");
+        
+        var conflicts = cidRemapping.GroupBy(kvp => (kvp.Key.Item2, kvp.Key.Item3))
+            .Where(g => g.Select(kvp => kvp.Value).Distinct().Count() > 1)
+            .ToList();
+        
+        Console.WriteLine($"Conflicts detected: {conflicts.Count}");
+        Assert.That(conflicts.Count, Is.EqualTo(0), "All CID conflicts should be resolved");
+        
+        Console.WriteLine($"\n✅ CID remapping successful - all conflicts resolved!");
+        
+        optimizer.Close();
+    }
+
+    [Test]
+    public void TestMergedFontWithCidRemapping()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        
+        var optimizer = new PdfFontOptimizer(testPdfPath);
+        optimizer.IndexFonts();
+        
+        var mapping = optimizer.CreateFontMappingTable();
+        var globalFontDict = optimizer.CreateGlobalFontDictionary(mapping);
+        
+        Console.WriteLine("\n=== Testing Merged Fonts with CID Remapping ===\n");
+        
+        foreach (var entry in globalFontDict.EntrySet())
+        {
+            var fontDict = globalFontDict.GetAsDictionary(entry.Key);
+            string fontName = entry.Key.ToString();
+            
+            Console.WriteLine($"📝 Checking font: {fontName}");
+            
+            var toUnicode = fontDict.Get(PdfName.ToUnicode);
+            if (toUnicode != null && toUnicode is PdfStream stream)
+            {
+                var cmapData = stream.GetBytes();
+                var cmapString = Encoding.UTF8.GetString(cmapData);
+                
+                var criticalChars = new Dictionary<string, string>
+                {
+                    { "0041", "A" },
+                    { "0052", "R" },
+                    { "0032", "2" },
+                    { "0035", "5" },
+                    { "002D", "-" }
+                };
+                
+                int foundCount = 0;
+                foreach (var kvp in criticalChars)
+                {
+                    if (cmapString.Contains($"<{kvp.Key}>"))
+                    {
+                        foundCount++;
+                        Console.WriteLine($"  ✅ U+{kvp.Key} ({kvp.Value}) found in ToUnicode");
+                        
+                        var pattern = $@"<([0-9A-Fa-f]+)>\s*<{kvp.Key}>";
+                        var match = Regex.Match(cmapString, pattern);
+                        if (match.Success)
+                        {
+                            Console.WriteLine($"     → Mapped to CID {match.Groups[1].Value}");
+                        }
+                    }
+                }
+                
+                if (fontName.Contains("Calibri") && foundCount == 5)
+                {
+                    Console.WriteLine($"  🎉 All critical characters found in {fontName}!");
+                }
+            }
+        }
+        
+        optimizer.Close();
+    }
+
+    [Test]
+    public void TestCompleteOptimizationWithCidRemapping()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        string outputPath = @"P:\pdf3\Ladders_Optimized_WithCID.pdf";
+
+        File.Copy(testPdfPath, outputPath, overwrite: true);
+
+        var optimizer = new PdfFontOptimizer(outputPath);
+        optimizer.IndexFonts();
+
+        var mapping = optimizer.CreateFontMappingTable();
+        var globalFontDict = optimizer.CreateGlobalFontDictionary(mapping);
+
+        optimizer.ApplyGlobalFontDictionary(globalFontDict, mapping, optimizer.GetFontCidRemappings());
+        optimizer.SaveOptimizedPdf(outputPath);
+
+        using (var reader = new PdfReader(outputPath))
+        using (var resultDoc = new PdfDocument(reader))
+        {
+            var text = iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(resultDoc.GetPage(1));
+
+            Assert.That(text.Contains("All Rates"), Is.True, "Should contain 'All Rates'");
+            Assert.That(text.Contains("Parallel"), Is.True, "Should contain 'Parallel'");
+            Assert.That(text.Contains("Ladders"), Is.True, "Should contain 'Ladders'");
+
+            Console.WriteLine($"✅ Text is now readable!");
+            Console.WriteLine($"First 200 chars: {text.Substring(0, Math.Min(200, text.Length))}");
+        }
+
+        optimizer.Close();
     }
 }

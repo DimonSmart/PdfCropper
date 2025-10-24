@@ -2,6 +2,8 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
 using iText.Kernel.Pdf.Canvas.Parser.Listener;
 using iText.Kernel.Pdf.Canvas.Parser.Data;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DimonSmart.PdfCropper.FontExperiments;
 
@@ -9,6 +11,7 @@ public class PdfFontOptimizer
 {
     private readonly PdfDocument document;
     private readonly Dictionary<int, List<FontInfo>> pageFonts;
+    private readonly Dictionary<string, Dictionary<(int, string, int), int>> fontCidRemappings = new Dictionary<string, Dictionary<(int, string, int), int>>();
 
     public class FontInfo
     {
@@ -42,6 +45,11 @@ public class PdfFontOptimizer
     public int GetPageCount()
     {
         return document.GetNumberOfPages();
+    }
+
+    public PdfDocument GetDocument()
+    {
+        return document;
     }
 
     public List<FontInfo> GetPageFonts(int pageNum)
@@ -592,16 +600,19 @@ public class PdfFontOptimizer
             mergedDict.Put(PdfName.Encoding, encoding);
         }
 
-        var mergedToUnicode = MergeToUnicodeMappings(contexts, baseFontName);
-        if (mergedToUnicode != null)
-        {
-            mergedDict.Put(PdfName.ToUnicode, mergedToUnicode);
-            Console.WriteLine($"  ✅ Applied merged ToUnicode CMap for {baseFontName}");
-        }
-        else
-        {
-            Console.WriteLine($"  ⚠️ No ToUnicode CMap available for {baseFontName}");
-        }
+        // НОВОЕ: Используем CID remapping вместо простого объединения
+        Console.WriteLine($"  🔄 Creating merged font dictionary for {baseFontName}:");
+        
+        var remapper = new CidRemapper();
+        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(contexts);
+        
+        Console.WriteLine($"  ✅ CID remapping complete: {mergedToUnicode.Count} unique CIDs");
+        
+        var toUnicodeStream = CreateRemappedToUnicodeCMap(mergedToUnicode, baseFontName);
+        mergedDict.Put(PdfName.ToUnicode, toUnicodeStream);
+        
+        StoreCidRemappingForFont(baseFontName, cidRemapping);
+        Console.WriteLine($"  ✅ Applied merged ToUnicode CMap for {baseFontName} with {mergedToUnicode.Count} mappings");
 
         if (PdfName.Type0.Equals(subtype))
         {
@@ -752,6 +763,53 @@ public class PdfFontOptimizer
         }
 
         return mergedDict;
+    }
+
+    private PdfStream CreateRemappedToUnicodeCMap(Dictionary<int, string> mergedToUnicode, string fontName)
+    {
+        var sb = new StringBuilder();
+        
+        sb.AppendLine("/CIDInit /ProcSet findresource begin");
+        sb.AppendLine("12 dict begin");
+        sb.AppendLine("begincmap");
+        sb.AppendLine("/CIDSystemInfo");
+        sb.AppendLine("<< /Registry (Adobe)");
+        sb.AppendLine("/Ordering (UCS)");
+        sb.AppendLine("/Supplement 0");
+        sb.AppendLine(">> def");
+        sb.AppendLine("/CMapName /Adobe-Identity-UCS def");
+        sb.AppendLine("/CMapType 2 def");
+        sb.AppendLine("1 begincodespacerange");
+        sb.AppendLine($"<0001> <{mergedToUnicode.Count:X4}>");
+        sb.AppendLine("endcodespacerange");
+        
+        if (mergedToUnicode.Count > 0)
+        {
+            sb.AppendLine($"{mergedToUnicode.Count} beginbfchar");
+            foreach (var kvp in mergedToUnicode.OrderBy(m => m.Key))
+            {
+                sb.AppendLine($"<{kvp.Key:X4}> <{kvp.Value}>");
+            }
+            sb.AppendLine("endbfchar");
+        }
+        
+        sb.AppendLine("endcmap");
+        sb.AppendLine("CMapName currentdict /CMap defineresource pop");
+        sb.AppendLine("end");
+        sb.AppendLine("end");
+        
+        var cmapBytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var stream = new PdfStream(cmapBytes);
+        
+        Console.WriteLine($"  ✅ Created ToUnicode CMap with {mergedToUnicode.Count} mappings");
+        
+        return stream;
+    }
+
+    private void StoreCidRemappingForFont(string fontName, Dictionary<(int, string, int), int> cidRemapping)
+    {
+        fontCidRemappings[fontName] = cidRemapping;
+        Console.WriteLine($"  💾 Stored CID remapping for {fontName}: {cidRemapping.Count} entries");
     }
 
     private void CopyFontMetrics(PdfDictionary source, PdfDictionary target)
@@ -1045,6 +1103,55 @@ public class PdfFontOptimizer
         Console.WriteLine("\n✅ Global font dictionary applied to all pages!");
     }
 
+    public void ApplyGlobalFontDictionary(
+        PdfDictionary globalFontDict,
+        Dictionary<string, string> mappingTable,
+        Dictionary<string, Dictionary<(int, string, int), int>> fontCidRemappings)
+    {
+        Console.WriteLine("\n=== Applying Global Font Dictionary ===");
+
+        int totalReplacements = 0;
+        var replacementStats = new Dictionary<string, int>();
+
+        for (int pageNum = 1; pageNum <= document.GetNumberOfPages(); pageNum++)
+        {
+            var page = document.GetPage(pageNum);
+            var resources = page.GetResources();
+
+            if (resources == null) continue;
+
+            var originalFontsDict = resources.GetPdfObject().GetAsDictionary(PdfName.Font);
+            if (originalFontsDict != null)
+            {
+                resources.GetPdfObject().Put(PdfName.Font, globalFontDict);
+            }
+
+            var pageCidRemapping = new Dictionary<(int, string, int), int>();
+            foreach (var fontRemapping in fontCidRemappings)
+            {
+                foreach (var cidMap in fontRemapping.Value)
+                {
+                    if (cidMap.Key.Item1 == pageNum)
+                    {
+                        pageCidRemapping[cidMap.Key] = cidMap.Value;
+                    }
+                }
+            }
+
+            int pageReplacements = UpdatePageContentStreamWithRemapping(
+                page, pageNum, mappingTable, pageCidRemapping, replacementStats);
+
+            totalReplacements += pageReplacements;
+
+            if (pageReplacements > 0)
+            {
+                Console.WriteLine($"Page {pageNum}: Updated {pageReplacements} references (font + CID)");
+            }
+        }
+
+        Console.WriteLine($"\n✅ Total replacements: {totalReplacements}");
+    }
+
     private int UpdatePageContentStream(PdfPage page, int pageNum, Dictionary<string, string> mappingTable, Dictionary<string, int> stats)
     {
         try
@@ -1097,6 +1204,108 @@ public class PdfFontOptimizer
         }
     }
 
+    private int UpdatePageContentStreamWithRemapping(
+        PdfPage page,
+        int pageNum,
+        Dictionary<string, string> resourceMapping,
+        Dictionary<(int, string, int), int> cidRemapping,
+        Dictionary<string, int> stats)
+    {
+        try
+        {
+            byte[] contentBytes = page.GetContentBytes();
+            string content = Encoding.UTF8.GetString(contentBytes);
+
+            int replacements = 0;
+
+            var cidPattern = new Regex(@"<([0-9A-Fa-f]+)>");
+            var tfPattern = new Regex(@"(\/F\d+)\s+([\d\.]+)\s+Tf");
+
+            string? currentFont = null;
+            var lines = content.Split('\n');
+            var updatedLines = new List<string>();
+
+            foreach (var line in lines)
+            {
+                string updatedLine = line;
+
+                var tfMatch = tfPattern.Match(line);
+                if (tfMatch.Success)
+                {
+                    string oldFontName = tfMatch.Groups[1].Value;
+                    currentFont = oldFontName;
+
+                    string mappingKey = $"{pageNum}_{oldFontName}";
+                    if (resourceMapping.TryGetValue(mappingKey, out string? newFontName))
+                    {
+                        updatedLine = line.Replace(oldFontName, newFontName);
+                        currentFont = newFontName;
+                        replacements++;
+
+                        string statKey = $"{oldFontName} -> {newFontName}";
+                        if (!stats.ContainsKey(statKey))
+                            stats[statKey] = 0;
+                        stats[statKey]++;
+                    }
+                }
+
+                if (currentFont != null && cidPattern.IsMatch(line))
+                {
+                    updatedLine = cidPattern.Replace(updatedLine, match =>
+                    {
+                        string cidHex = match.Groups[1].Value;
+                        int oldCid = Convert.ToInt32(cidHex, 16);
+
+                        string? originalResource = null;
+                        foreach (var mapping in resourceMapping)
+                        {
+                            if (mapping.Key.StartsWith($"{pageNum}_") && mapping.Value == currentFont)
+                            {
+                                originalResource = mapping.Key.Substring(mapping.Key.IndexOf('_') + 1);
+                                break;
+                            }
+                        }
+
+                        if (originalResource != null)
+                        {
+                            var remappingKey = (pageNum, originalResource, oldCid);
+                            if (cidRemapping.TryGetValue(remappingKey, out int newCid))
+                            {
+                                replacements++;
+                                return $"<{newCid:X4}>";
+                            }
+                        }
+
+                        return match.Value;
+                    });
+                }
+
+                updatedLines.Add(updatedLine);
+            }
+
+            if (replacements > 0)
+            {
+                string updatedContent = string.Join("\n", updatedLines);
+                byte[] newContentBytes = Encoding.UTF8.GetBytes(updatedContent);
+                
+                var contentStream = page.GetFirstContentStream();
+                contentStream.SetData(newContentBytes);
+            }
+
+            return replacements;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error updating page {pageNum}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    public Dictionary<string, Dictionary<(int, string, int), int>> GetFontCidRemappings()
+    {
+        return fontCidRemappings;
+    }
+
     public void SaveOptimizedPdf()
     {
         try
@@ -1114,8 +1323,193 @@ public class PdfFontOptimizer
         }
     }
 
+    public void SaveOptimizedPdf(string outputPath)
+    {
+        SaveOptimizedPdf();
+    }
+
     public void Close()
     {
         document.Close();
+    }
+
+    // Публичный метод для тестирования объединения ToUnicode (вызывает приватный метод)
+    public PdfStream? TestMergeToUnicodeMappings(List<FontContext> contexts, string baseFontName)
+    {
+        return MergeToUnicodeMappings(contexts, baseFontName);
+    }
+
+    public class CidRemapper
+    {
+        private int nextAvailableCid = 1;
+
+        public (Dictionary<int, string> mergedToUnicode, Dictionary<(int, string, int), int> cidRemapping)
+            RemapCidsWithConflictResolution(List<FontContext> contexts)
+        {
+            var mergedToUnicode = new Dictionary<int, string>();
+            var cidRemapping = new Dictionary<(int pageNum, string resourceName, int oldCid), int>();
+            var unicodeToCid = new Dictionary<string, int>();
+
+            // ДИАГНОСТИКА: Отслеживаем критические символы
+            var criticalUnicodes = new HashSet<string> { "0041", "0052", "0032", "0035", "002D" };
+            var criticalFound = new Dictionary<string, List<(int page, string resource, int cid)>>();
+
+            Console.WriteLine($"  🔧 Resolving CID conflicts for {contexts.Count} contexts:");
+
+            foreach (var context in contexts)
+            {
+                var toUnicode = context.FontDict?.Get(PdfName.ToUnicode);
+                if (toUnicode != null && toUnicode is PdfStream stream)
+                {
+                    var cmapData = stream.GetBytes();
+                    var cmapString = Encoding.UTF8.GetString(cmapData);
+                    var mappings = ExtractMappingsFromToUnicode(cmapString);
+
+                    Console.WriteLine($"    Context: Page {context.PageNumber}, {context.ResourceName}");
+                    Console.WriteLine($"      Extracted {mappings.Count} mappings");
+
+                    // ДИАГНОСТИКА: Проверяем критические символы
+                    foreach (var kvp in mappings)
+                    {
+                        if (criticalUnicodes.Contains(kvp.Value))
+                        {
+                            if (!criticalFound.ContainsKey(kvp.Value))
+                                criticalFound[kvp.Value] = new List<(int, string, int)>();
+
+                            criticalFound[kvp.Value].Add((context.PageNumber, context.ResourceName, kvp.Key));
+                            Console.WriteLine($"      ✅ Found critical: U+{kvp.Value} at CID {kvp.Key:X4}");
+                        }
+                    }
+
+                    foreach (var kvp in mappings)
+                    {
+                        int oldCid = kvp.Key;
+                        string unicode = kvp.Value;
+
+                        if (unicodeToCid.TryGetValue(unicode, out int existingCid))
+                        {
+                            cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = existingCid;
+                        }
+                        else
+                        {
+                            int newCid = nextAvailableCid++;
+                            mergedToUnicode[newCid] = unicode;
+                            unicodeToCid[unicode] = newCid;
+                            cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = newCid;
+
+                            // ДИАГНОСТИКА
+                            if (criticalUnicodes.Contains(unicode))
+                            {
+                                Console.WriteLine($"      📌 Assigned new CID {newCid} to critical U+{unicode}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ДИАГНОСТИКА: Финальная проверка
+            Console.WriteLine($"\n  🔍 Critical characters in final mapping:");
+            foreach (var critical in criticalUnicodes)
+            {
+                var found = mergedToUnicode.Any(m => m.Value == critical);
+                if (found)
+                {
+                    var cid = mergedToUnicode.First(m => m.Value == critical).Key;
+                    Console.WriteLine($"    ✅ U+{critical} → CID {cid}");
+                }
+                else
+                {
+                    Console.WriteLine($"    ❌ U+{critical} → NOT FOUND");
+                    if (criticalFound.ContainsKey(critical))
+                    {
+                        Console.WriteLine($"       Was found in: {string.Join(", ", criticalFound[critical].Select(f => $"{f.resource}@p{f.page}"))}");
+                    }
+                }
+            }
+
+            Console.WriteLine($"  ✅ Remapped to {mergedToUnicode.Count} unique CIDs (was {cidRemapping.Count} total mappings)");
+
+            return (mergedToUnicode, cidRemapping);
+        }
+
+        private Dictionary<int, string> ExtractMappingsFromToUnicode(string cmapString)
+        {
+            var mappings = new Dictionary<int, string>();
+
+            // Формат 1: beginbfchar/endbfchar (одиночные маппинги)
+            // <0020> <0041>
+            var bfcharPattern = new Regex(@"beginbfchar\s*(.*?)\s*endbfchar", RegexOptions.Singleline);
+            var bfcharMatches = bfcharPattern.Matches(cmapString);
+
+            foreach (Match bfcharMatch in bfcharMatches)
+            {
+                var content = bfcharMatch.Groups[1].Value;
+                var singlePattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>");
+
+                foreach (Match match in singlePattern.Matches(content))
+                {
+                    try
+                    {
+                        int cid = Convert.ToInt32(match.Groups[1].Value, 16);
+                        string unicode = match.Groups[2].Value.ToUpper();
+                        mappings[cid] = unicode;
+                    }
+                    catch { }
+                }
+            }
+
+            // Формат 2: beginbfrange/endbfrange (диапазоны)
+            var bfrangePattern = new Regex(@"beginbfrange\s*(.*?)\s*endbfrange", RegexOptions.Singleline);
+            var bfrangeMatches = bfrangePattern.Matches(cmapString);
+
+            foreach (Match bfrangeMatch in bfrangeMatches)
+            {
+                var content = bfrangeMatch.Groups[1].Value;
+
+                // Формат с массивом: <start> <end> [<val1> <val2> ...]
+                var arrayPattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[(.*?)\]", RegexOptions.Singleline);
+                foreach (Match match in arrayPattern.Matches(content))
+                {
+                    try
+                    {
+                        int startCid = Convert.ToInt32(match.Groups[1].Value, 16);
+                        int endCid = Convert.ToInt32(match.Groups[2].Value, 16);
+                        string unicodesStr = match.Groups[3].Value;
+
+                        var unicodePattern = new Regex(@"<([0-9A-Fa-f]+)>");
+                        var unicodeMatches = unicodePattern.Matches(unicodesStr);
+
+                        for (int i = 0; i <= endCid - startCid && i < unicodeMatches.Count; i++)
+                        {
+                            mappings[startCid + i] = unicodeMatches[i].Groups[1].Value.ToUpper();
+                        }
+                    }
+                    catch { }
+                }
+
+                // Формат с одним значением: <start> <end> <startUnicode>
+                var simpleRangePattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>");
+                foreach (Match match in simpleRangePattern.Matches(content))
+                {
+                    if (!match.Value.Contains("[")) // Убедимся, что это не массив
+                    {
+                        try
+                        {
+                            int startCid = Convert.ToInt32(match.Groups[1].Value, 16);
+                            int endCid = Convert.ToInt32(match.Groups[2].Value, 16);
+                            int startUnicode = Convert.ToInt32(match.Groups[3].Value, 16);
+
+                            for (int i = 0; i <= endCid - startCid; i++)
+                            {
+                                mappings[startCid + i] = (startUnicode + i).ToString("X4");
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            return mappings;
+        }
     }
 }
