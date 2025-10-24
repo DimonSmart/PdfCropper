@@ -604,8 +604,8 @@ public class PdfFontOptimizer
         Console.WriteLine($"  🔄 Creating merged font dictionary for {baseFontName}:");
         
         var remapper = new CidRemapper();
-        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(contexts);
-        
+        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(contexts, document);
+
         Console.WriteLine($"  ✅ CID remapping complete: {mergedToUnicode.Count} unique CIDs");
         
         var toUnicodeStream = CreateRemappedToUnicodeCMap(mergedToUnicode, baseFontName);
@@ -1230,7 +1230,7 @@ public class PdfFontOptimizer
             var cidPattern = new Regex(@"<([0-9A-Fa-f]+)>");
             var tfPattern = new Regex(@"(\/F\d+)\s+([\d\.]+)\s+Tf");
 
-            string? currentFont = null;
+            string? currentOriginalFont = null; // ИЗМЕНЕНИЕ: Храним оригинальный ресурс, а не новый.
             var lines = content.Split('\n');
             var updatedLines = new List<string>();
 
@@ -1242,13 +1242,13 @@ public class PdfFontOptimizer
                 if (tfMatch.Success)
                 {
                     string oldFontName = tfMatch.Groups[1].Value;
-                    currentFont = oldFontName;
+                    currentOriginalFont = oldFontName; // ИЗМЕНЕНИЕ: Запоминаем текущий ОРИГИНАЛЬНЫЙ шрифт.
 
                     string mappingKey = $"{pageNum}_{oldFontName}";
                     if (resourceMapping.TryGetValue(mappingKey, out string? newFontName))
                     {
+                        // Замена имени ресурса на новое по-прежнему происходит.
                         updatedLine = line.Replace(oldFontName, newFontName);
-                        currentFont = newFontName;
                         replacements++;
 
                         string statKey = $"{oldFontName} -> {newFontName}";
@@ -1258,31 +1258,27 @@ public class PdfFontOptimizer
                     }
                 }
 
-                if (currentFont != null && cidPattern.IsMatch(line))
+                // ИЗМЕНЕНИЕ: Проверяем, что currentOriginalFont установлен.
+                if (currentOriginalFont != null && cidPattern.IsMatch(updatedLine))
                 {
                     updatedLine = cidPattern.Replace(updatedLine, match =>
                     {
                         string cidHex = match.Groups[1].Value;
                         int oldCid = Convert.ToInt32(cidHex, 16);
 
-                        string? originalResource = null;
-                        foreach (var mapping in resourceMapping)
+                        // ИЗМЕНЕНИЕ: Больше не нужно угадывать. Мы точно знаем оригинальный ресурс.
+                        var remappingKey = (pageNum, currentOriginalFont, oldCid);
+                        if (cidRemapping.TryGetValue(remappingKey, out int newCid))
                         {
-                            if (mapping.Key.StartsWith($"{pageNum}_") && mapping.Value == currentFont)
-                            {
-                                originalResource = mapping.Key.Substring(mapping.Key.IndexOf('_') + 1);
-                                break;
-                            }
+                            replacements++;
+                            // Можете оставить этот Debug-вывод для проверки
+                            Console.WriteLine($"DEBUG: Page {pageNum}, OldRes {currentOriginalFont}: Remapping CID <{oldCid:X4}> -> <{newCid:X4}>");
+                            return $"<{newCid:X4}>";
                         }
-
-                        if (originalResource != null)
+                        else
                         {
-                            var remappingKey = (pageNum, originalResource, oldCid);
-                            if (cidRemapping.TryGetValue(remappingKey, out int newCid))
-                            {
-                                replacements++;
-                                return $"<{newCid:X4}>";
-                            }
+                            // Ошибки теперь должны исчезнуть
+                            Console.WriteLine($"ERROR: Page {pageNum}, OldRes {currentOriginalFont}: CID Remapping FAILED for oldCid <{oldCid:X4}>");
                         }
 
                         return match.Value;
@@ -1296,9 +1292,9 @@ public class PdfFontOptimizer
             {
                 string updatedContent = string.Join("\n", updatedLines);
                 byte[] newContentBytes = Encoding.UTF8.GetBytes(updatedContent);
-                
-                var contentStream = page.GetFirstContentStream();
-                contentStream.SetData(newContentBytes);
+
+                // В iText 7/8 лучше получать новый поток и заменять его
+                page.GetContentStream(0).SetData(newContentBytes);
             }
 
             return replacements;
@@ -1352,172 +1348,158 @@ public class PdfFontOptimizer
     {
         private int nextAvailableCid = 1;
 
-        public (Dictionary<int, string> mergedToUnicode, Dictionary<(int, string, int), int> cidRemapping)
-            RemapCidsWithConflictResolution(List<FontContext> contexts)
+        // Вспомогательный класс-слушатель для сбора CID. Теперь он намного проще.
+        private class UsedCidListener : IEventListener
         {
-            var mergedToUnicode = new Dictionary<int, string>();
-            var cidRemapping = new Dictionary<(int pageNum, string resourceName, int oldCid), int>();
-            var unicodeToCid = new Dictionary<string, int>();
+            public HashSet<int> Cids { get; } = new HashSet<int>();
+            private readonly PdfDictionary _targetFontDict;
 
-            // ДИАГНОСТИКА: Отслеживаем критические символы
-            var criticalUnicodes = new HashSet<string> { "0041", "0052", "0032", "0035", "002D" };
-            var criticalFound = new Dictionary<string, List<(int page, string resource, int cid)>>();
+            public UsedCidListener(PdfDictionary targetFontDict)
+            {
+                _targetFontDict = targetFontDict;
+            }
 
-            Console.WriteLine($"  🔧 Resolving CID conflicts for {contexts.Count} contexts:");
+            public void EventOccurred(IEventData data, EventType type)
+            {
+                if (type != EventType.RENDER_TEXT) return;
 
+                var renderInfo = (TextRenderInfo)data;
+                var currentFontDict = renderInfo.GetFont().GetPdfObject();
+
+                if (!_targetFontDict.Equals(currentFontDict)) return;
+
+                var pdfString = renderInfo.GetPdfString();
+                var font = renderInfo.GetFont();
+                var glyphs = font.DecodeIntoGlyphLine(pdfString);
+
+                if (glyphs == null) return;
+
+                for (int i = 0; i < glyphs.Size(); i++)
+                {
+                    var glyph = glyphs.Get(i);
+
+                    if (glyph != null)
+                    {
+                        int code = glyph.GetCode();
+                        Cids.Add(code);
+
+                        int unicode = glyph.GetUnicode();
+
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Glyph Code (CID): {code}, Unicode: {unicode}, " +
+                            $"Char: {(unicode > 0 ? ((char)unicode).ToString() : "N/A")}");
+                    }
+                }
+            }
+
+            public ICollection<EventType> GetSupportedEvents() => new[] { EventType.RENDER_TEXT };
+        }
+
+        public (Dictionary<int, string> mergedToUnicode, Dictionary<(int, string, int), int> cidRemapping)
+            RemapCidsWithConflictResolution(List<FontContext> contexts, PdfDocument document)
+        {
+            var mergedToUnicode = new Dictionary<int, string>(); // NewCid -> Unicode
+            var cidRemapping = new Dictionary<(int pageNum, string resourceName, int oldCid), int>(); // Ключ -> NewCid
+            var unicodeToCid = new Dictionary<string, int>(); // Unicode -> NewCid
+
+            Console.WriteLine($"  🔧 Resolving CID conflicts for {contexts.Count} contexts using full content scan:");
+
+            // Шаг 1: Собираем ВСЕ используемые CID из реального контента страниц.
+            var allCidsByContext = new Dictionary<(int pageNum, string resourceName), HashSet<int>>();
             foreach (var context in contexts)
             {
-                var toUnicode = context.FontDict?.Get(PdfName.ToUnicode);
-                if (toUnicode != null && toUnicode is PdfStream stream)
+                if (context.FontDict == null) continue;
+
+                var listener = new UsedCidListener(context.FontDict);
+                var processor = new PdfCanvasProcessor(listener);
+                processor.ProcessPageContent(document.GetPage(context.PageNumber));
+
+                var cidsFound = listener.Cids;
+                Console.WriteLine($"    Context: Page {context.PageNumber}, {context.ResourceName}. Found {cidsFound.Count} CIDs in content.");
+                allCidsByContext[(context.PageNumber, context.ResourceName)] = cidsFound;
+            }
+
+            // Шаг 2: Теперь, имея полный список CID, строим карты перекодировки.
+            foreach (var context in contexts)
+            {
+                var contextKey = (context.PageNumber, context.ResourceName);
+                if (!allCidsByContext.TryGetValue(contextKey, out var usedCids)) continue;
+
+                // Получаем ToUnicode карту для этого конкретного экземпляра шрифта
+                var toUnicodeMappings = new Dictionary<int, string>();
+                var toUnicodeStream = context.FontDict?.Get(PdfName.ToUnicode) as PdfStream;
+                if (toUnicodeStream != null)
                 {
-                    var cmapData = stream.GetBytes();
-                    var cmapString = Encoding.UTF8.GetString(cmapData);
-                    var mappings = ExtractMappingsFromToUnicode(cmapString);
+                    toUnicodeMappings = ExtractMappingsFromToUnicode(Encoding.UTF8.GetString(toUnicodeStream.GetBytes()));
+                }
 
-                    Console.WriteLine($"    Context: Page {context.PageNumber}, {context.ResourceName}");
-                    Console.WriteLine($"      Extracted {mappings.Count} mappings");
-
-                    // ДИАГНОСТИКА: Проверяем критические символы
-                    foreach (var kvp in mappings)
+                foreach (var oldCid in usedCids)
+                {
+                    if (toUnicodeMappings.TryGetValue(oldCid, out var unicodeValue))
                     {
-                        if (criticalUnicodes.Contains(kvp.Value))
+                        // У этого CID есть Unicode. Проверяем, встречался ли он нам раньше.
+                        if (unicodeToCid.TryGetValue(unicodeValue, out var existingNewCid))
                         {
-                            if (!criticalFound.ContainsKey(kvp.Value))
-                                criticalFound[kvp.Value] = new List<(int, string, int)>();
-
-                            criticalFound[kvp.Value].Add((context.PageNumber, context.ResourceName, kvp.Key));
-                            Console.WriteLine($"      ✅ Found critical: U+{kvp.Value} at CID {kvp.Key:X4}");
-                        }
-                    }
-
-                    foreach (var kvp in mappings)
-                    {
-                        int oldCid = kvp.Key;
-                        string unicode = kvp.Value;
-
-                        if (unicodeToCid.TryGetValue(unicode, out int existingCid))
-                        {
-                            cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = existingCid;
+                            // Да, встречался. Переиспользуем его новый CID.
+                            cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = existingNewCid;
                         }
                         else
                         {
+                            // Нет, это новый уникальный символ. Генерируем для него новый CID.
                             int newCid = nextAvailableCid++;
-                            mergedToUnicode[newCid] = unicode;
-                            unicodeToCid[unicode] = newCid;
+                            mergedToUnicode[newCid] = unicodeValue;
+                            unicodeToCid[unicodeValue] = newCid;
                             cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = newCid;
-
-                            // ДИАГНОСТИКА
-                            if (criticalUnicodes.Contains(unicode))
-                            {
-                                Console.WriteLine($"      📌 Assigned new CID {newCid} to critical U+{unicode}");
-                            }
                         }
                     }
-                }
-            }
-
-            // ДИАГНОСТИКА: Финальная проверка
-            Console.WriteLine($"\n  🔍 Critical characters in final mapping:");
-            foreach (var critical in criticalUnicodes)
-            {
-                var found = mergedToUnicode.Any(m => m.Value == critical);
-                if (found)
-                {
-                    var cid = mergedToUnicode.First(m => m.Value == critical).Key;
-                    Console.WriteLine($"    ✅ U+{critical} → CID {cid}");
-                }
-                else
-                {
-                    Console.WriteLine($"    ❌ U+{critical} → NOT FOUND");
-                    if (criticalFound.ContainsKey(critical))
+                    else
                     {
-                        Console.WriteLine($"       Was found in: {string.Join(", ", criticalFound[critical].Select(f => $"{f.resource}@p{f.page}"))}");
+                        // У этого CID нет Unicode (например, пробел или глиф без семантики).
+                        // Ему нужно дать свой уникальный CID, чтобы он не слился с другими.
+                        int newCid = nextAvailableCid++;
+                        cidRemapping[(context.PageNumber, context.ResourceName, oldCid)] = newCid;
                     }
                 }
             }
 
-            Console.WriteLine($"  ✅ Remapped to {mergedToUnicode.Count} unique CIDs (was {cidRemapping.Count} total mappings)");
-
+            Console.WriteLine($"  ✅ Remapped to {nextAvailableCid - 1} unique CIDs in total ({mergedToUnicode.Count} have unicode values).");
             return (mergedToUnicode, cidRemapping);
         }
 
+        // Метод ExtractMappingsFromToUnicode остается без изменений.
         private Dictionary<int, string> ExtractMappingsFromToUnicode(string cmapString)
         {
             var mappings = new Dictionary<int, string>();
-
-            // Формат 1: beginbfchar/endbfchar (одиночные маппинги)
-            // <0020> <0041>
             var bfcharPattern = new Regex(@"beginbfchar\s*(.*?)\s*endbfchar", RegexOptions.Singleline);
-            var bfcharMatches = bfcharPattern.Matches(cmapString);
-
-            foreach (Match bfcharMatch in bfcharMatches)
+            foreach (Match bfcharMatch in bfcharPattern.Matches(cmapString))
             {
                 var content = bfcharMatch.Groups[1].Value;
-                var singlePattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>");
-
+                var singlePattern = new Regex(@"<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]{4})>");
                 foreach (Match match in singlePattern.Matches(content))
                 {
-                    try
-                    {
-                        int cid = Convert.ToInt32(match.Groups[1].Value, 16);
-                        string unicode = match.Groups[2].Value.ToUpper();
-                        mappings[cid] = unicode;
-                    }
-                    catch { }
+                    try { mappings[Convert.ToInt32(match.Groups[1].Value, 16)] = match.Groups[2].Value.ToUpper(); } catch { }
                 }
             }
-
-            // Формат 2: beginbfrange/endbfrange (диапазоны)
             var bfrangePattern = new Regex(@"beginbfrange\s*(.*?)\s*endbfrange", RegexOptions.Singleline);
-            var bfrangeMatches = bfrangePattern.Matches(cmapString);
-
-            foreach (Match bfrangeMatch in bfrangeMatches)
+            foreach (Match bfrangeMatch in bfrangePattern.Matches(cmapString))
             {
                 var content = bfrangeMatch.Groups[1].Value;
-
-                // Формат с массивом: <start> <end> [<val1> <val2> ...]
-                var arrayPattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[(.*?)\]", RegexOptions.Singleline);
-                foreach (Match match in arrayPattern.Matches(content))
+                var simpleRangePattern = new Regex(@"<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]{4})>");
+                foreach (Match match in simpleRangePattern.Matches(content))
                 {
                     try
                     {
                         int startCid = Convert.ToInt32(match.Groups[1].Value, 16);
                         int endCid = Convert.ToInt32(match.Groups[2].Value, 16);
-                        string unicodesStr = match.Groups[3].Value;
-
-                        var unicodePattern = new Regex(@"<([0-9A-Fa-f]+)>");
-                        var unicodeMatches = unicodePattern.Matches(unicodesStr);
-
-                        for (int i = 0; i <= endCid - startCid && i < unicodeMatches.Count; i++)
+                        int startUnicode = Convert.ToInt32(match.Groups[3].Value, 16);
+                        for (int i = 0; i <= endCid - startCid; i++)
                         {
-                            mappings[startCid + i] = unicodeMatches[i].Groups[1].Value.ToUpper();
+                            mappings[startCid + i] = (startUnicode + i).ToString("X4");
                         }
                     }
                     catch { }
                 }
-
-                // Формат с одним значением: <start> <end> <startUnicode>
-                var simpleRangePattern = new Regex(@"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>");
-                foreach (Match match in simpleRangePattern.Matches(content))
-                {
-                    if (!match.Value.Contains("[")) // Убедимся, что это не массив
-                    {
-                        try
-                        {
-                            int startCid = Convert.ToInt32(match.Groups[1].Value, 16);
-                            int endCid = Convert.ToInt32(match.Groups[2].Value, 16);
-                            int startUnicode = Convert.ToInt32(match.Groups[3].Value, 16);
-
-                            for (int i = 0; i <= endCid - startCid; i++)
-                            {
-                                mappings[startCid + i] = (startUnicode + i).ToString("X4");
-                            }
-                        }
-                        catch { }
-                    }
-                }
             }
-
             return mappings;
         }
     }

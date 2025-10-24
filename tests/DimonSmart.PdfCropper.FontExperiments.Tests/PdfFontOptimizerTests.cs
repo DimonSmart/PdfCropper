@@ -29,7 +29,7 @@ public class PdfFontOptimizerTests
     }
 
     [Test]
-    public void TestFontIndexing()
+    public void TestFontIndexing_Step1()
     {
         string testPdfPath = @"P:\pdf3\Ladders.pdf";
 
@@ -735,7 +735,7 @@ public class PdfFontOptimizerTests
         Console.WriteLine($"Found {calibriContexts.Count} Calibri font contexts on pages 1-4");
         
         var remapper = new PdfFontOptimizer.CidRemapper();
-        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(calibriContexts);
+        var (mergedToUnicode, cidRemapping) = remapper.RemapCidsWithConflictResolution(calibriContexts, document);
         
         Console.WriteLine($"\n=== CID Remapping Results ===");
         Console.WriteLine($"Original mappings with conflicts: {cidRemapping.Count}");
@@ -857,16 +857,17 @@ public class PdfFontOptimizerTests
         string testPdfPath = @"P:\pdf3\Ladders.pdf";
         string outputPath = @"P:\pdf3\Ladders_Optimized_WithCID.pdf";
 
-        File.Copy(testPdfPath, outputPath, overwrite: true);
-
-        var optimizer = new PdfFontOptimizer(outputPath);
+        var optimizer = new PdfFontOptimizer(testPdfPath, outputPath);
         optimizer.IndexFonts();
 
         var mapping = optimizer.CreateFontMappingTable();
         var globalFontDict = optimizer.CreateGlobalFontDictionary(mapping);
 
         optimizer.ApplyGlobalFontDictionary(globalFontDict, mapping, optimizer.GetFontCidRemappings());
-        optimizer.SaveOptimizedPdf(outputPath);
+        optimizer.SaveOptimizedPdf();
+
+        // Small delay to ensure file is fully written
+        System.Threading.Thread.Sleep(100);
 
         using (var reader = new PdfReader(outputPath))
         using (var resultDoc = new PdfDocument(reader))
@@ -880,7 +881,193 @@ public class PdfFontOptimizerTests
             Console.WriteLine($"✅ Text is now readable!");
             Console.WriteLine($"First 200 chars: {text.Substring(0, Math.Min(200, text.Length))}");
         }
+    }
 
-        optimizer.Close();
+    [Test]
+    public void DiagnoseFileSizes()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        string outputPath = @"P:\pdf3\Ladders_Optimized_WithCID.pdf";
+
+        var originalSize = new FileInfo(testPdfPath).Length;
+        Console.WriteLine($"\n=== File Size Diagnostic ===\n");
+        Console.WriteLine($"Original PDF size: {originalSize:N0} bytes ({originalSize / 1024.0 / 1024.0:F2} MB)");
+
+        if (File.Exists(outputPath))
+        {
+            var optimizedSize = new FileInfo(outputPath).Length;
+            Console.WriteLine($"Optimized PDF size: {optimizedSize:N0} bytes ({optimizedSize / 1024.0 / 1024.0:F2} MB)");
+
+            var increase = optimizedSize - originalSize;
+            var percentChange = (increase * 100.0) / originalSize;
+            Console.WriteLine($"Size change: {increase:N0} bytes ({percentChange:+0.0;-0.0}%)");
+
+            if (increase > 0)
+            {
+                Console.WriteLine($"\n⚠️  WARNING: File size INCREASED by {increase / 1024.0:F1} KB");
+            }
+            else
+            {
+                Console.WriteLine($"\n✅ File size DECREASED by {-increase / 1024.0:F1} KB");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"\n⚠️  Optimized file not found. Run TestCompleteOptimizationWithCidRemapping first.");
+            return;
+        }
+
+        Console.WriteLine("\n=== FontFile2 Sizes in Original PDF ===");
+        AnalyzeFontFile2Sizes(testPdfPath);
+
+        Console.WriteLine("\n=== FontFile2 Sizes in Optimized PDF ===");
+        AnalyzeFontFile2Sizes(outputPath);
+
+        Console.WriteLine("\n=== Font Merging Analysis ===");
+        AnalyzeFontMerging(outputPath);
+    }
+
+    private void AnalyzeFontMerging(string pdfPath)
+    {
+        using (var reader = new PdfReader(pdfPath))
+        using (var doc = new PdfDocument(reader))
+        {
+            Console.WriteLine($"Checking all {doc.GetNumberOfPages()} pages for font resource sharing:\n");
+
+            var allPageFonts = new Dictionary<int, Dictionary<string, string>>();
+
+            for (int pageNum = 1; pageNum <= doc.GetNumberOfPages(); pageNum++)
+            {
+                var page = doc.GetPage(pageNum);
+                var resources = page.GetResources();
+                var fontsDict = resources?.GetPdfObject()?.GetAsDictionary(PdfName.Font);
+
+                if (fontsDict == null) continue;
+
+                var pageFontInfo = new Dictionary<string, string>();
+
+                foreach (var entry in fontsDict.EntrySet())
+                {
+                    var fontDict = fontsDict.GetAsDictionary(entry.Key);
+                    if (fontDict == null) continue;
+
+                    var baseFont = fontDict.GetAsName(PdfName.BaseFont)?.GetValue() ?? "Unknown";
+                    var fontObjectNumber = fontDict.GetIndirectReference()?.GetObjNumber() ?? 0;
+
+                    pageFontInfo[entry.Key.ToString()] = $"{baseFont} (obj#{fontObjectNumber})";
+                }
+
+                allPageFonts[pageNum] = pageFontInfo;
+            }
+
+            var fontsByObject = new Dictionary<int, List<string>>();
+
+            foreach (var pageInfo in allPageFonts)
+            {
+                int pageNum = pageInfo.Key;
+                foreach (var fontInfo in pageInfo.Value)
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(fontInfo.Value, @"obj#(\d+)");
+                    if (match.Success)
+                    {
+                        int objNum = int.Parse(match.Groups[1].Value);
+                        if (!fontsByObject.ContainsKey(objNum))
+                        {
+                            fontsByObject[objNum] = [];
+                        }
+                        fontsByObject[objNum].Add($"Page {pageNum}: {fontInfo.Key} ({fontInfo.Value.Split('(')[0].Trim()})");
+                    }
+                }
+            }
+
+            Console.WriteLine("Font Dictionary Sharing (by object number):\n");
+            int sharedCount = 0;
+
+            foreach (var objInfo in fontsByObject.OrderBy(kv => kv.Key))
+            {
+                if (objInfo.Value.Count > 1)
+                {
+                    sharedCount++;
+                    Console.WriteLine($"  Object #{objInfo.Key} is shared by {objInfo.Value.Count} pages:");
+                    foreach (var usage in objInfo.Value)
+                    {
+                        Console.WriteLine($"    - {usage}");
+                    }
+                    Console.WriteLine();
+                }
+            }
+
+            if (sharedCount == 0)
+            {
+                Console.WriteLine("  ❌ NO FONT SHARING DETECTED!");
+                Console.WriteLine("  Each page has its own font dictionary copies.");
+                Console.WriteLine("  Font merging DID NOT HAPPEN!");
+            }
+            else
+            {
+                Console.WriteLine($"  ✅ Found {sharedCount} shared font dictionaries");
+            }
+
+            Console.WriteLine($"\n=== Expected vs Actual ===");
+            Console.WriteLine($"Expected: 3 merged fonts (Calibri, TableauBook, TableauMedium)");
+            Console.WriteLine($"Actual: {fontsByObject.Count} unique font objects");
+            
+            if (fontsByObject.Count > 3)
+            {
+                Console.WriteLine($"⚠️  Problem: We have {fontsByObject.Count} font objects instead of 3!");
+            }
+        }
+    }
+
+    private void AnalyzeFontFile2Sizes(string pdfPath)
+    {
+        using (var reader = new PdfReader(pdfPath))
+        using (var doc = new PdfDocument(reader))
+        {
+            var page1 = doc.GetPage(1);
+            var resources = page1.GetResources();
+            var fontsDict = resources?.GetPdfObject()?.GetAsDictionary(PdfName.Font);
+
+            if (fontsDict == null)
+            {
+                Console.WriteLine("  No fonts found");
+                return;
+            }
+
+            long totalFontFile2Size = 0;
+            int fontFile2Count = 0;
+
+            foreach (var entry in fontsDict.EntrySet())
+            {
+                var fontDict = fontsDict.GetAsDictionary(entry.Key);
+                if (fontDict == null) continue;
+
+                string fontName = entry.Key.ToString();
+                var baseFont = fontDict.GetAsName(PdfName.BaseFont)?.GetValue() ?? "Unknown";
+
+                if (PdfName.Type0.Equals(fontDict.GetAsName(PdfName.Subtype)))
+                {
+                    var descendantFonts = fontDict.GetAsArray(PdfName.DescendantFonts);
+                    var cidFont = descendantFonts?.GetAsDictionary(0);
+                    var fontDescriptor = cidFont?.GetAsDictionary(PdfName.FontDescriptor);
+                    var fontFile2 = fontDescriptor?.GetAsStream(PdfName.FontFile2);
+
+                    if (fontFile2 != null)
+                    {
+                        var size = fontFile2.GetBytes().Length;
+                        totalFontFile2Size += size;
+                        fontFile2Count++;
+                        Console.WriteLine($"  {fontName} ({baseFont}): FontFile2 = {size:N0} bytes ({size / 1024.0:F1} KB)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  {fontName} ({baseFont}): No FontFile2");
+                    }
+                }
+            }
+
+            Console.WriteLine($"\n  Total FontFile2 data: {totalFontFile2Size:N0} bytes ({totalFontFile2Size / 1024.0:F1} KB)");
+            Console.WriteLine($"  Number of FontFile2 streams: {fontFile2Count}");
+        }
     }
 }
