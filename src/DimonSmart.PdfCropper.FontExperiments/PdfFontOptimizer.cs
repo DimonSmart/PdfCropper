@@ -100,6 +100,7 @@ public class PdfFontOptimizer
 
         string fontName = baseFont.GetValue();
 
+        // Удаляем subset-префикс
         if (fontName.Length > 7 && fontName[6] == '+')
         {
             bool isSubset = true;
@@ -119,55 +120,44 @@ public class PdfFontOptimizer
             }
         }
 
-        int dashIndex = fontName.IndexOf('-');
-        if (dashIndex > 0)
-        {
-            string suffix = fontName.Substring(dashIndex + 1);
-            if (suffix.All(c => char.IsDigit(c) || c == '-'))
-            {
-                fontName = fontName.Substring(0, dashIndex);
-            }
-        }
+        var pattern = @"-\d+(-\d+)*$";
+        fontName = System.Text.RegularExpressions.Regex.Replace(fontName, pattern, "");
 
         return fontName;
     }
 
     public Dictionary<string, List<FontInfo>> GetFontStatistics()
     {
-        var stats = new Dictionary<string, List<FontInfo>>();
-
-        foreach (var pageEntry in pageFonts)
-        {
-            foreach (var font in pageEntry.Value)
-            {
-                if (!stats.ContainsKey(font.BaseFontName))
-                {
-                    stats[font.BaseFontName] = [];
-                }
-                stats[font.BaseFontName].Add(font);
-            }
-        }
-
-        return stats;
+        return pageFonts
+            .SelectMany(page => page.Value)
+            .GroupBy(font => font.BaseFontName)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToList()
+            );
     }
 
     public List<string> DetectResourceConflicts()
     {
         var conflicts = new List<string>();
-        var resourceMap = new Dictionary<string, HashSet<string>>();
+        var resourceMap = new Dictionary<string, Dictionary<string, List<int>>>(); // resource -> (font -> pages)
 
         foreach (var pageEntry in pageFonts)
         {
+            int pageNum = pageEntry.Key;
             foreach (var font in pageEntry.Value)
             {
-                string key = font.ResourceName;
-
-                if (!resourceMap.ContainsKey(key))
+                if (!resourceMap.ContainsKey(font.ResourceName))
                 {
-                    resourceMap[key] = [];
+                    resourceMap[font.ResourceName] = new Dictionary<string, List<int>>();
                 }
 
-                resourceMap[key].Add(font.BaseFontName);
+                if (!resourceMap[font.ResourceName].ContainsKey(font.BaseFontName))
+                {
+                    resourceMap[font.ResourceName][font.BaseFontName] = new List<int>();
+                }
+
+                resourceMap[font.ResourceName][font.BaseFontName].Add(pageNum);
             }
         }
 
@@ -175,7 +165,9 @@ public class PdfFontOptimizer
         {
             if (entry.Value.Count > 1)
             {
-                conflicts.Add($"Resource {entry.Key} maps to different fonts: {string.Join(", ", entry.Value)}");
+                var details = entry.Value.Select(kvp =>
+                    $"{kvp.Key} (pages: {string.Join(",", kvp.Value)})");
+                conflicts.Add($"Resource {entry.Key} maps to different fonts: {string.Join(" vs ", details)}");
             }
         }
 
@@ -600,10 +592,15 @@ public class PdfFontOptimizer
             mergedDict.Put(PdfName.Encoding, encoding);
         }
 
-        var toUnicode = firstFontDict?.Get(PdfName.ToUnicode);
-        if (toUnicode != null)
+        var mergedToUnicode = MergeToUnicodeMappings(contexts, baseFontName);
+        if (mergedToUnicode != null)
         {
-            mergedDict.Put(PdfName.ToUnicode, toUnicode);
+            mergedDict.Put(PdfName.ToUnicode, mergedToUnicode);
+            Console.WriteLine($"  ✅ Applied merged ToUnicode CMap for {baseFontName}");
+        }
+        else
+        {
+            Console.WriteLine($"  ⚠️ No ToUnicode CMap available for {baseFontName}");
         }
 
         if (PdfName.Type0.Equals(subtype))
@@ -775,6 +772,147 @@ public class PdfFontOptimizer
                 target.Put(key, value);
             }
         }
+    }
+
+    private Dictionary<int, string> ExtractMappingsFromToUnicode(PdfStream toUnicodeStream)
+    {
+        var mappings = new Dictionary<int, string>();
+
+        try
+        {
+            var cmapData = toUnicodeStream.GetBytes();
+            var cmapString = System.Text.Encoding.UTF8.GetString(cmapData);
+
+            var singlePattern = new System.Text.RegularExpressions.Regex(
+                @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+
+            var rangePattern = new System.Text.RegularExpressions.Regex(
+                @"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+
+            foreach (System.Text.RegularExpressions.Match match in rangePattern.Matches(cmapString))
+            {
+                if (match.Groups.Count == 4)
+                {
+                    int startCid = Convert.ToInt32(match.Groups[1].Value, 16);
+                    int endCid = Convert.ToInt32(match.Groups[2].Value, 16);
+                    int startUnicode = Convert.ToInt32(match.Groups[3].Value, 16);
+
+                    for (int i = 0; i <= endCid - startCid; i++)
+                    {
+                        int cid = startCid + i;
+                        if (!mappings.ContainsKey(cid))
+                        {
+                            mappings[cid] = (startUnicode + i).ToString("X4");
+                        }
+                    }
+                }
+            }
+
+            foreach (System.Text.RegularExpressions.Match match in singlePattern.Matches(cmapString))
+            {
+                if (match.Groups.Count == 3)
+                {
+                    int cid = Convert.ToInt32(match.Groups[1].Value, 16);
+                    string unicode = match.Groups[2].Value;
+
+                    if (!mappings.ContainsKey(cid))
+                    {
+                        mappings[cid] = unicode;
+                    }
+                }
+            }
+
+            Console.WriteLine($"    Extracted {mappings.Count} CID->Unicode mappings from ToUnicode");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    ⚠️ Error extracting ToUnicode mappings: {ex.Message}");
+        }
+
+        return mappings;
+    }
+
+    private PdfStream CreateToUnicodeCMap(Dictionary<int, string> mappings)
+    {
+        var sb = new System.Text.StringBuilder();
+        
+        sb.AppendLine("/CIDInit /ProcSet findresource begin");
+        sb.AppendLine("12 dict begin");
+        sb.AppendLine("begincmap");
+        sb.AppendLine("/CIDSystemInfo");
+        sb.AppendLine("<< /Registry (Adobe)");
+        sb.AppendLine("/Ordering (UCS)");
+        sb.AppendLine("/Supplement 0");
+        sb.AppendLine(">> def");
+        sb.AppendLine("/CMapName /Adobe-Identity-UCS def");
+        sb.AppendLine("/CMapType 2 def");
+        sb.AppendLine("1 begincodespacerange");
+        sb.AppendLine("<0000> <FFFF>");
+        sb.AppendLine("endcodespacerange");
+        
+        if (mappings.Count > 0)
+        {
+            sb.AppendLine($"{mappings.Count} beginbfchar");
+            foreach (var kvp in mappings.OrderBy(m => m.Key))
+            {
+                sb.AppendLine($"<{kvp.Key:X4}> <{kvp.Value}>");
+            }
+            sb.AppendLine("endbfchar");
+        }
+        
+        sb.AppendLine("endcmap");
+        sb.AppendLine("CMapName currentdict /CMap defineresource pop");
+        sb.AppendLine("end");
+        sb.AppendLine("end");
+
+        var cmapBytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        var stream = new PdfStream(cmapBytes);
+        
+        return stream;
+    }
+
+    private PdfStream? MergeToUnicodeMappings(List<FontContext> contexts, string baseFontName)
+    {
+        var mergedMappings = new Dictionary<int, string>();
+        int totalSources = 0;
+
+        Console.WriteLine($"  🔄 Merging ToUnicode mappings for {baseFontName} from {contexts.Count} contexts:");
+
+        foreach (var context in contexts)
+        {
+            var toUnicode = context.FontDict?.Get(PdfName.ToUnicode);
+            if (toUnicode != null && toUnicode is PdfStream stream)
+            {
+                totalSources++;
+                Console.WriteLine($"    Context {totalSources}: Page {context.PageNumber}, {context.ResourceName}");
+                
+                var mappings = ExtractMappingsFromToUnicode(stream);
+                
+                foreach (var kvp in mappings)
+                {
+                    if (!mergedMappings.ContainsKey(kvp.Key))
+                    {
+                        mergedMappings[kvp.Key] = kvp.Value;
+                    }
+                    else if (mergedMappings[kvp.Key] != kvp.Value)
+                    {
+                        Console.WriteLine($"      ⚠️ CID conflict: <{kvp.Key:X4}> maps to <{mergedMappings[kvp.Key]}> and <{kvp.Value}>");
+                    }
+                }
+            }
+        }
+
+        if (mergedMappings.Count == 0)
+        {
+            Console.WriteLine($"    ⚠️ No ToUnicode mappings found in any context for {baseFontName}");
+            return null;
+        }
+
+        Console.WriteLine($"    ✅ Merged {mergedMappings.Count} total mappings from {totalSources} sources");
+
+        return CreateToUnicodeCMap(mergedMappings);
     }
 
     private HashSet<int> CollectAllGlyphs(List<FontContext> contexts)
