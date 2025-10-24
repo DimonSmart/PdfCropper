@@ -44,6 +44,15 @@ public class PdfFontOptimizer
         return document.GetNumberOfPages();
     }
 
+    public List<FontInfo> GetPageFonts(int pageNum)
+    {
+        if (pageFonts.ContainsKey(pageNum))
+        {
+            return pageFonts[pageNum];
+        }
+        return [];
+    }
+
     public void IndexFonts()
     {
         for (int pageNum = 1; pageNum <= document.GetNumberOfPages(); pageNum++)

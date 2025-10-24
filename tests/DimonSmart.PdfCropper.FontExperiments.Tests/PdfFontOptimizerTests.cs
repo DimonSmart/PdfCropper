@@ -421,4 +421,188 @@ public class PdfFontOptimizerTests
         // Cleanup
         optimizer.Close();
     }
+
+    [Test]
+    public void DiagnoseTextTransformationIssue()
+    {
+        string testPdfPath = @"P:\pdf3\Ladders.pdf";
+        string outputPath = @"P:\pdf3\Ladders_DiagnosticTest.pdf";
+
+        var testPhrases = new Dictionary<string, string>
+        {
+            { "Original", "All Rates Parallel Ladders as of 2025-10-17" },
+            { "Corrupted_Visual", "ll ates Parallel Ladders as o     10 1" },
+            { "Corrupted_Copy", "Ϯ0ϮϱͲ10Ͳ" }
+        };
+
+        File.Copy(testPdfPath, outputPath, overwrite: true);
+
+        Console.WriteLine("\n=== TOUNICODE MAPPING DIAGNOSTIC ===\n");
+
+        var optimizer = new PdfFontOptimizer(outputPath);
+        optimizer.IndexFonts();
+
+        DiagnoseToUnicodeMappings(optimizer, "BEFORE MERGE");
+
+        var mapping = optimizer.CreateFontMappingTable();
+        var globalFontDict = optimizer.CreateGlobalFontDictionary(mapping);
+
+        DiagnoseToUnicodeMappingsInGlobalDict(globalFontDict, "AFTER MERGE");
+
+        optimizer.ApplyGlobalFontDictionary(globalFontDict, mapping);
+        optimizer.SaveOptimizedPdf();
+
+        AnalyzeTextExtraction(outputPath, testPhrases);
+
+        optimizer.Close();
+    }
+
+    private void DiagnoseToUnicodeMappings(PdfFontOptimizer optimizer, string stage)
+    {
+        Console.WriteLine($"\n--- {stage} ---");
+
+        var criticalChars = new Dictionary<char, string>
+        {
+            { 'A', "Capital A" },
+            { 'R', "Capital R" },
+            { '2', "Digit 2" },
+            { '5', "Digit 5" },
+            { '-', "Hyphen" }
+        };
+
+        var page1Fonts = optimizer.GetPageFonts(1);
+
+        foreach (var font in page1Fonts)
+        {
+            Console.WriteLine($"\nFont: {font.ResourceName} ({font.BaseFontName})");
+
+            var toUnicode = font.FontDict?.Get(PdfName.ToUnicode);
+            if (toUnicode != null && toUnicode is PdfStream stream)
+            {
+                var cmapData = stream.GetBytes();
+                var cmapString = System.Text.Encoding.UTF8.GetString(cmapData);
+
+                Console.WriteLine("  ToUnicode entries for critical chars:");
+
+                foreach (var kvp in criticalChars)
+                {
+                    string unicodeHex = ((int)kvp.Key).ToString("X4");
+                    if (cmapString.Contains(unicodeHex))
+                    {
+                        Console.WriteLine($"    {kvp.Value} (U+{unicodeHex}): FOUND");
+
+                        var pattern = $@"<([0-9A-Fa-f]+)>\s*<{unicodeHex}>";
+                        var match = System.Text.RegularExpressions.Regex.Match(cmapString, pattern);
+                        if (match.Success)
+                        {
+                            Console.WriteLine($"      CID: {match.Groups[1].Value}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    {kvp.Value} (U+{unicodeHex}): NOT FOUND ⚠️");
+                    }
+                }
+            }
+        }
+    }
+
+    private void DiagnoseToUnicodeMappingsInGlobalDict(PdfDictionary globalFontDict, string stage)
+    {
+        Console.WriteLine($"\n--- {stage} ---");
+
+        var criticalChars = new Dictionary<char, string>
+        {
+            { 'A', "Capital A" },
+            { 'R', "Capital R" },
+            { '2', "Digit 2" },
+            { '5', "Digit 5" },
+            { '-', "Hyphen" }
+        };
+
+        foreach (var entry in globalFontDict.EntrySet())
+        {
+            var fontDict = globalFontDict.GetAsDictionary(entry.Key);
+            if (fontDict == null) continue;
+
+            var baseFontName = fontDict.GetAsName(PdfName.BaseFont)?.GetValue() ?? "Unknown";
+            Console.WriteLine($"\nMerged Font: {entry.Key} ({baseFontName})");
+
+            var toUnicode = fontDict.Get(PdfName.ToUnicode);
+            if (toUnicode != null && toUnicode is PdfStream stream)
+            {
+                var cmapData = stream.GetBytes();
+                var cmapString = System.Text.Encoding.UTF8.GetString(cmapData);
+
+                Console.WriteLine("  ToUnicode entries for critical chars:");
+
+                foreach (var kvp in criticalChars)
+                {
+                    string unicodeHex = ((int)kvp.Key).ToString("X4");
+                    if (cmapString.Contains(unicodeHex))
+                    {
+                        Console.WriteLine($"    {kvp.Value} (U+{unicodeHex}): FOUND");
+
+                        var pattern = $@"<([0-9A-Fa-f]+)>\s*<{unicodeHex}>";
+                        var match = System.Text.RegularExpressions.Regex.Match(cmapString, pattern);
+                        if (match.Success)
+                        {
+                            Console.WriteLine($"      CID: {match.Groups[1].Value}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    {kvp.Value} (U+{unicodeHex}): NOT FOUND ⚠️");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("  ⚠️ No ToUnicode CMap found!");
+            }
+        }
+    }
+
+    private void AnalyzeTextExtraction(string pdfPath, Dictionary<string, string> expectedPhrases)
+    {
+        Console.WriteLine("\n=== TEXT EXTRACTION ANALYSIS ===\n");
+
+        using (var reader = new PdfReader(pdfPath))
+        using (var document = new PdfDocument(reader))
+        {
+            var strategy = new iText.Kernel.Pdf.Canvas.Parser.Listener.SimpleTextExtractionStrategy();
+            var text = iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(document.GetPage(1), strategy);
+
+            Console.WriteLine("Extracted text (first 200 chars):");
+            Console.WriteLine(text.Substring(0, Math.Min(200, text.Length)));
+
+            Console.WriteLine("\n--- Phrase Detection ---");
+
+            if (text.Contains(expectedPhrases["Original"]))
+            {
+                Console.WriteLine("✅ Original phrase found correctly");
+            }
+            else
+            {
+                Console.WriteLine("❌ Original phrase NOT found");
+
+                Console.WriteLine("\nCharacter-by-character analysis:");
+                var original = expectedPhrases["Original"];
+
+                for (int i = 0; i < Math.Min(50, original.Length); i++)
+                {
+                    char expectedChar = original[i];
+
+                    if (text.Length > i)
+                    {
+                        char actualChar = text[i];
+                        if (expectedChar != actualChar)
+                        {
+                            Console.WriteLine($"  Position {i}: Expected '{expectedChar}' (U+{((int)expectedChar):X4}), Got '{actualChar}' (U+{((int)actualChar):X4})");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
