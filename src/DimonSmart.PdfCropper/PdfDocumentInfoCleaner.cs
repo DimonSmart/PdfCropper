@@ -46,14 +46,9 @@ internal static class PdfDocumentInfoCleaner
             return;
         }
 
+        var info = pdfDocument.GetDocumentInfo();
         var trailer = pdfDocument.GetTrailer();
         var infoDictionary = trailer?.GetAsDictionary(PdfName.Info);
-        var info = pdfDocument.GetDocumentInfo();
-
-        if (infoDictionary == null && info == null)
-        {
-            return;
-        }
 
         var removedAny = false;
 
@@ -68,9 +63,23 @@ internal static class PdfDocumentInfoCleaner
             try
             {
                 var pdfName = ResolveDocumentInfoName(normalized);
-                if (infoDictionary != null && infoDictionary.Remove(pdfName) != null)
+                var removedFromDict = false;
+
+                if (infoDictionary != null && infoDictionary.ContainsKey(pdfName))
                 {
+                    infoDictionary.Remove(pdfName);
+                    removedFromDict = true;
                     removedAny = true;
+                }
+
+                // If not removed directly (e.g. dictionary not accessible), use API
+                // Also use API for custom keys if dictionary access failed
+                if (!removedFromDict)
+                {
+                    if (RemoveDocumentInfoEntry(info, normalized))
+                    {
+                        removedAny = true;
+                    }
                 }
             }
             catch (ArgumentException)
@@ -85,6 +94,35 @@ internal static class PdfDocumentInfoCleaner
         }
 
         infoDictionary?.SetModified();
+    }
+
+    private static bool RemoveDocumentInfoEntry(PdfDocumentInfo? info, string key)
+    {
+        if (info == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Try removing via SetMoreInfo with null, which works for custom keys and many standard ones
+            // in raw dictionary mode.
+            info.SetMoreInfo(key, null);
+
+            // Verify removal
+            if (string.IsNullOrEmpty(info.GetMoreInfo(key)))
+            {
+                return true;
+            }
+
+            // Fallback: set to empty string if null didn't remove it (mostly for paranoid compatibility)
+            info.SetMoreInfo(key, string.Empty);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static PdfName ResolveDocumentInfoName(string key)

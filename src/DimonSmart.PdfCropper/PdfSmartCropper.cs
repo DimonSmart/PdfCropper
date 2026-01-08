@@ -330,7 +330,7 @@ public static class PdfSmartCropper
         using var pdfDocument = new PdfDocument(reader, writer);
 
         await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
-        // pdfDocument.Close(); // Handled by Dispose
+        pdfDocument.Close();
 
         return outputStream.ToArray();
     }
