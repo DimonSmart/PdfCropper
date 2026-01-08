@@ -483,7 +483,28 @@ internal static class ContentBasedCroppingStrategy
 
     private static long Quantize(double value)
     {
-        return (long)Math.Round(value * BoundsQuantizationScale, MidpointRounding.AwayFromZero);
+        if (double.IsNaN(value))
+        {
+            return 0;
+        }
+
+        if (double.IsInfinity(value))
+        {
+            return value > 0 ? long.MaxValue : long.MinValue;
+        }
+
+        var scaled = value * BoundsQuantizationScale;
+        if (scaled >= long.MaxValue)
+        {
+            return long.MaxValue;
+        }
+
+        if (scaled <= long.MinValue)
+        {
+            return long.MinValue;
+        }
+
+        return (long)Math.Round(scaled, MidpointRounding.AwayFromZero);
     }
 
     private readonly record struct ContentObjectMetadata(ContentObjectType Type, string? Text, long? ImageResourceId, int? PathHash);

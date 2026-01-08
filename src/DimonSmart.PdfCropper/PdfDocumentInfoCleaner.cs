@@ -32,7 +32,8 @@ internal static class PdfDocumentInfoCleaner
 
         var infoDictionary = trailer.GetAsDictionary(PdfName.Info);
         infoDictionary?.Clear();
-        trailer.Remove(PdfName.Info);
+        // Do not remove the Info dictionary from the trailer to prevent issues during PdfDocument.Close()
+        // trailer.Remove(PdfName.Info);
     }
 
     public static void RemoveKeys(PdfDocument pdfDocument, IReadOnlyCollection<string> keys)
@@ -71,11 +72,6 @@ internal static class PdfDocumentInfoCleaner
                 {
                     removedAny = true;
                 }
-
-                if (RemoveDocumentInfoEntry(info, normalized))
-                {
-                    removedAny = true;
-                }
             }
             catch (ArgumentException)
             {
@@ -89,56 +85,6 @@ internal static class PdfDocumentInfoCleaner
         }
 
         infoDictionary?.SetModified();
-
-        if (infoDictionary != null && infoDictionary.Size() == 0)
-        {
-            trailer?.Remove(PdfName.Info);
-        }
-    }
-
-    private static bool RemoveDocumentInfoEntry(PdfDocumentInfo? info, string key)
-    {
-        if (info == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            switch (key.ToLowerInvariant())
-            {
-                case "title":
-                    info.SetTitle(null);
-                    return true;
-                case "author":
-                    info.SetAuthor(null);
-                    return true;
-                case "subject":
-                    info.SetSubject(null);
-                    return true;
-                case "keywords":
-                    info.SetKeywords(null);
-                    return true;
-                case "creator":
-                    info.SetCreator(null);
-                    return true;
-                case "producer":
-                    info.SetProducer(null);
-                    return true;
-                default:
-                    info.SetMoreInfo(key, null);
-                    if (!string.IsNullOrEmpty(info.GetMoreInfo(key)))
-                    {
-                        info.SetMoreInfo(key, string.Empty);
-                    }
-
-                    return true;
-            }
-        }
-        catch (Exception)
-        {
-            return false;
-        }
     }
 
     private static PdfName ResolveDocumentInfoName(string key)
@@ -151,6 +97,9 @@ internal static class PdfDocumentInfoCleaner
             "keywords" => PdfName.Keywords,
             "creator" => PdfName.Creator,
             "producer" => PdfName.Producer,
+            "creationdate" => PdfName.CreationDate,
+            "moddate" => PdfName.ModDate,
+            "trapped" => PdfName.Trapped,
             _ => new PdfName(key)
         };
     }

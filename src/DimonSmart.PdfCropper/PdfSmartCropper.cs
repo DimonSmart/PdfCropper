@@ -119,8 +119,8 @@ public static class PdfSmartCropper
         var totalStopwatch = Stopwatch.StartNew();
         var operationName = inputs.Count == 1 ? "PDF cropping" : "PDF merging";
         var totalInputSize = inputs.Sum(input => input.LongLength);
-        
-        var message = inputs.Count == 1 
+
+        var message = inputs.Count == 1
             ? $"Input PDF size: {inputs[0].Length:N0} bytes"
             : $"Starting PDF merging for {inputs.Count} document(s)";
         await logger.LogInfoAsync(message).ConfigureAwait(false);
@@ -136,13 +136,13 @@ public static class PdfSmartCropper
             var completionMessage = $"{operationName} completed successfully";
             await logger.LogInfoAsync(completionMessage).ConfigureAwait(false);
             await Task.Yield();
-            
+
             var timeMessage = $"Total processing time: {FormatElapsed(totalStopwatch.Elapsed)}";
             await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
             await Task.Yield();
 
             var finalResult = await ApplyXmpOptimizationsAsync(resultBytes, optimizationSettings, logger).ConfigureAwait(false);
-            
+
             await LogSizeComparisonAsync(totalInputSize, finalResult.Length, logger).ConfigureAwait(false);
 
             return finalResult;
@@ -199,14 +199,41 @@ public static class PdfSmartCropper
     {
         using var inputStream = new MemoryStream(inputPdf, writable: false);
         using var outputStream = new MemoryStream();
-        
+
         using var reader = new PdfReader(inputStream, new ReaderProperties());
         using var writer = CreatePdfWriter(outputStream, optimizationSettings);
-        using var pdfDocument = new PdfDocument(reader, writer);
+        var pdfDocument = new PdfDocument(reader, writer);
+        var closed = false;
 
-        await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
-        await ApplyFinalOptimizationsAsync(pdfDocument, optimizationSettings, logger).ConfigureAwait(false);
-        pdfDocument.Close();
+        try
+        {
+            await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
+            await ApplyFinalOptimizationsAsync(pdfDocument, optimizationSettings, logger).ConfigureAwait(false);
+
+            await logger.LogInfoAsync("Saving document (this might take a while)...").ConfigureAwait(false);
+            pdfDocument.Close();
+            closed = true;
+        }
+        catch (Exception ex)
+        {
+            await logger.LogErrorAsync($"Document saving failed: {ex.Message}").ConfigureAwait(false);
+            await logger.LogErrorAsync(ex.ToString()).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            if (!closed && !pdfDocument.IsClosed())
+            {
+                try
+                {
+                    pdfDocument.Close();
+                }
+                catch
+                {
+                    // Ignore errors during emergency close
+                }
+            }
+        }
 
         return outputStream.ToArray();
     }
@@ -220,38 +247,65 @@ public static class PdfSmartCropper
     {
         using var outputStream = new MemoryStream();
         using var writer = CreatePdfWriter(outputStream, optimizationSettings);
-        using var outputDocument = new PdfDocument(writer);
-        
+        var outputDocument = new PdfDocument(writer);
+        var closed = false;
+
         var merger = new PdfMerger(outputDocument);
 
-        var documentIndex = 0;
-        foreach (var input in inputs)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            documentIndex++;
-            
-            var docMessage = $"Processing document {documentIndex}/{inputs.Count}";
-            await logger.LogInfoAsync(docMessage).ConfigureAwait(false);
-            await Task.Yield();
-            
-            var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, ct).ConfigureAwait(false);
-            
-            using var croppedStream = new MemoryStream(croppedBytes, writable: false);
-            using var reader = new PdfReader(croppedStream, new ReaderProperties());
-            using var croppedDocument = new PdfDocument(reader);
+            var documentIndex = 0;
+            foreach (var input in inputs)
+            {
+                ct.ThrowIfCancellationRequested();
+                documentIndex++;
 
-            var existingPageCount = outputDocument.GetNumberOfPages();
-            var pageCount = croppedDocument.GetNumberOfPages();
+                var docMessage = $"Processing document {documentIndex}/{inputs.Count}";
+                await logger.LogInfoAsync(docMessage).ConfigureAwait(false);
+                await Task.Yield();
 
-            merger.Merge(croppedDocument, 1, pageCount);
+                var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, ct).ConfigureAwait(false);
 
-            CopyPageBoxes(outputDocument, croppedDocument, existingPageCount, pageCount);
-            
-            await Task.Yield();
+                using var croppedStream = new MemoryStream(croppedBytes, writable: false);
+                using var reader = new PdfReader(croppedStream, new ReaderProperties());
+                using var croppedDocument = new PdfDocument(reader);
+
+                var existingPageCount = outputDocument.GetNumberOfPages();
+                var pageCount = croppedDocument.GetNumberOfPages();
+
+                merger.Merge(croppedDocument, 1, pageCount);
+
+                CopyPageBoxes(outputDocument, croppedDocument, existingPageCount, pageCount);
+
+                await Task.Yield();
+            }
+
+            await ApplyFinalOptimizationsAsync(outputDocument, optimizationSettings, logger).ConfigureAwait(false);
+
+            await logger.LogInfoAsync("Saving document (this might take a while)...").ConfigureAwait(false);
+            outputDocument.Close();
+            closed = true;
         }
-
-        await ApplyFinalOptimizationsAsync(outputDocument, optimizationSettings, logger).ConfigureAwait(false);
-        outputDocument.Close();
+        catch (Exception ex)
+        {
+            await logger.LogErrorAsync($"Document saving failed: {ex.Message}").ConfigureAwait(false);
+            await logger.LogErrorAsync(ex.ToString()).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            if (!closed && !outputDocument.IsClosed())
+            {
+                try
+                {
+                    outputDocument.Close();
+                }
+                catch
+                {
+                    // Ignore errors during emergency close
+                }
+            }
+        }
 
         return outputStream.ToArray();
     }
@@ -276,7 +330,7 @@ public static class PdfSmartCropper
         using var pdfDocument = new PdfDocument(reader, writer);
 
         await CropPagesAsync(pdfDocument, inputPdf, cropSettings, logger, ct).ConfigureAwait(false);
-        pdfDocument.Close();
+        // pdfDocument.Close(); // Handled by Dispose
 
         return outputStream.ToArray();
     }
@@ -318,7 +372,7 @@ public static class PdfSmartCropper
 
             var sizeMessage = $"Page {pageIndex}/{pageCount}: Original size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts";
             await logger.LogInfoAsync(sizeMessage).ConfigureAwait(false);
-            
+
             await Task.Yield();
 
             if (IsPageEmpty(page, ct))
@@ -329,7 +383,7 @@ public static class PdfSmartCropper
                 pageDurations[pageIndex - 1] = elapsed;
                 await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(elapsed)}").ConfigureAwait(false);
                 skippedPages[pageIndex - 1] = true;
-                
+
                 await Task.Yield();
                 continue;
             }
@@ -345,7 +399,7 @@ public static class PdfSmartCropper
 
             pageStopwatch.Stop();
             pageDurations[pageIndex - 1] = pageStopwatch.Elapsed;
-            
+
             await Task.Yield();
         }
 
@@ -418,7 +472,7 @@ public static class PdfSmartCropper
                 await logger.LogWarningAsync($"Page {pageIndex}: No crop applied (no content bounds found)").ConfigureAwait(false);
                 var totalTime = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
                 await logger.LogInfoAsync($"Page {pageIndex}: Processing time = {FormatElapsed(totalTime)}").ConfigureAwait(false);
-                
+
                 await Task.Yield();
                 continue;
             }
@@ -435,7 +489,7 @@ public static class PdfSmartCropper
             var totalDuration = pageDurations[pageIndex - 1] + pageStopwatch.Elapsed;
             var timeMessage = $"Page {pageIndex}: Processing time = {FormatElapsed(totalDuration)}";
             await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
-            
+
             await Task.Yield();
         }
     }
@@ -447,24 +501,61 @@ public static class PdfSmartCropper
     {
         if (optimizationSettings.MergeDuplicateFontSubsets)
         {
-            await FontSubsetMerger.MergeDuplicateSubsetsAsync(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger).ConfigureAwait(false);
+            await logger.LogInfoAsync("Merging duplicate font subsets...").ConfigureAwait(false);
+            try
+            {
+                await FontSubsetMerger.MergeDuplicateSubsetsAsync(pdfDocument, FontSubsetMergeOptions.CreateDefault(), logger).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await logger.LogErrorAsync($"Font subset merging failed: {ex.Message}").ConfigureAwait(false);
+                throw new PdfCropException(PdfCropErrorCode.ProcessingError, "Font merging failed", ex);
+            }
         }
 
-        PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
+        await logger.LogInfoAsync("Cleaning document info...").ConfigureAwait(false);
+        try
+        {
+            PdfDocumentInfoCleaner.Apply(pdfDocument, optimizationSettings);
+        }
+        catch (Exception ex)
+        {
+            await logger.LogErrorAsync($"Document info cleaning failed: {ex.Message}").ConfigureAwait(false);
+            throw new PdfCropException(PdfCropErrorCode.ProcessingError, "Document info cleaning failed", ex);
+        }
 
         if (optimizationSettings.RemoveEmbeddedStandardFonts)
         {
-            PdfStandardFontCleaner.RemoveEmbeddedStandardFonts(pdfDocument);
+            await logger.LogInfoAsync("Removing embedded standard fonts...").ConfigureAwait(false);
+            try
+            {
+                PdfStandardFontCleaner.RemoveEmbeddedStandardFonts(pdfDocument);
+            }
+            catch (Exception ex)
+            {
+                await logger.LogErrorAsync($"Standard font removal failed: {ex.Message}").ConfigureAwait(false);
+                throw new PdfCropException(PdfCropErrorCode.ProcessingError, "Standard font removal failed", ex);
+            }
         }
 
         if (ShouldRecompressDocumentStreams(optimizationSettings))
         {
+            await logger.LogInfoAsync("Recompressing document streams...").ConfigureAwait(false);
             var targetCompressionLevel = optimizationSettings.CompressionLevel ?? CompressionConstants.BEST_COMPRESSION;
-            RecompressDocumentStreams(pdfDocument, targetCompressionLevel);
+            try
+            {
+                RecompressDocumentStreams(pdfDocument, targetCompressionLevel);
+            }
+            catch (Exception ex)
+            {
+                await logger.LogErrorAsync($"Stream recompression failed: {ex.Message}").ConfigureAwait(false);
+                throw new PdfCropException(PdfCropErrorCode.ProcessingError, "Stream recompression failed", ex);
+            }
         }
 
         if (optimizationSettings.RemoveUnusedObjects)
         {
+            await logger.LogInfoAsync("Marking unused objects for removal...").ConfigureAwait(false);
             pdfDocument.SetFlushUnusedObjects(true);
         }
     }
@@ -566,12 +657,12 @@ public static class PdfSmartCropper
     {
         var writerProps = CreateWriterProperties(optimizationSettings);
         var writer = new PdfWriter(outputStream, writerProps);
-        
+
         if (optimizationSettings.EnableSmartMode)
         {
             writer.SetSmartMode(true);
         }
-        
+
         return writer;
     }
 
@@ -619,24 +710,28 @@ public static class PdfSmartCropper
             case BadPasswordException:
                 await logger.LogErrorAsync($"PDF is encrypted: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-            
+
             case PdfCropException:
                 return;
-            
+
             case PdfException when IsEncryptionError((PdfException)ex):
                 await logger.LogErrorAsync($"PDF encryption error: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.EncryptedPdf, ex.Message, ex);
-            
+
             case PdfException:
                 await logger.LogErrorAsync($"Invalid PDF: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-            
+
             case IOException:
                 await logger.LogErrorAsync($"I/O error: {ex.Message}").ConfigureAwait(false);
                 throw new PdfCropException(PdfCropErrorCode.InvalidPdf, ex.Message, ex);
-            
+
             default:
                 await logger.LogErrorAsync($"Processing error: {ex.Message}").ConfigureAwait(false);
+                if (ex.StackTrace != null)
+                {
+                    await logger.LogErrorAsync(ex.StackTrace).ConfigureAwait(false);
+                }
                 throw new PdfCropException(PdfCropErrorCode.ProcessingError, ex.Message, ex);
         }
     }
