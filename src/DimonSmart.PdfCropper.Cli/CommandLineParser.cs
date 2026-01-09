@@ -14,7 +14,8 @@ internal sealed record CommandLineOptions(
     PdfOptimizationSettings OptimizationSettings,
     LogLevel LogLevel,
     bool MergeIntoSingleOutput,
-    bool MergeFontSubsets);
+    bool MergeFontSubsets,
+    int? DebugPageIndex);
 
 internal sealed class CommandLineParseResult
 {
@@ -78,6 +79,7 @@ internal static class CommandLineParser
         var removeEmbeddedStandardFonts = false;
         var infoKeys = new List<string>();
         var logLevel = LogLevel.None;
+        int? debugPageIndex = null;
         PdfCompatibilityLevel? targetPdfVersion = null;
         var mergeIntoSingleOutput = false;
         var mergeFontSubsets = false;
@@ -105,6 +107,20 @@ internal static class CommandLineParser
                         return CommandLineParseResult.Failure($"Invalid log level '{levelToken}'. Valid values: none, debug, trace, information, warning, error.");
                     }
 
+                    break;
+
+                case "--debug-page":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--debug-page requires a 1-based page number");
+                    }
+
+                    if (!int.TryParse(args[++i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDebugPage) || parsedDebugPage < 1)
+                    {
+                        return CommandLineParseResult.Failure("--debug-page must be a positive integer (1-based page index)");
+                    }
+
+                    debugPageIndex = parsedDebugPage;
                     break;
 
                 case "-m":
@@ -315,6 +331,11 @@ internal static class CommandLineParser
             }
         }
 
+        if (debugPageIndex.HasValue && logLevel == LogLevel.None)
+        {
+            logLevel = LogLevel.Information;
+        }
+
         var cropSettings = new CropSettings(
             method,
             excludeEdge,
@@ -342,7 +363,8 @@ internal static class CommandLineParser
             optimizationSettings,
             logLevel,
             mergeIntoSingleOutput,
-            mergeFontSubsets);
+            mergeFontSubsets,
+            debugPageIndex);
         return CommandLineParseResult.Ok(options);
     }
 

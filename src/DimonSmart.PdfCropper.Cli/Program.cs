@@ -50,13 +50,14 @@ static async Task<int> RunAsync(string[] args)
     var outputPath = options.OutputPath;
     var logLevel = options.LogLevel;
     var mergeIntoSingleOutput = options.MergeIntoSingleOutput;
+    var debugPageIndex = options.DebugPageIndex;
 
     var inputHasMask = BatchPlanner.ContainsGlobPattern(inputPath);
     var outputHasMask = BatchPlanner.ContainsGlobPattern(outputPath);
 
     if (mergeIntoSingleOutput)
     {
-        var logger = new ConsoleLogger(logLevel);
+        var logger = new ConsoleLogger(logLevel, debugPageIndex);
         IReadOnlyList<string> inputs;
 
         if (inputHasMask)
@@ -105,7 +106,7 @@ static async Task<int> RunAsync(string[] args)
             return plan.ExitCode;
         }
 
-        var logger = new ConsoleLogger(logLevel);
+        var logger = new ConsoleLogger(logLevel, debugPageIndex);
         foreach (var item in plan.Files)
         {
             await logger.LogInfoAsync($"Processing {item.InputPath} -> {item.OutputPath}").ConfigureAwait(false);
@@ -137,13 +138,13 @@ static async Task<int> RunAsync(string[] args)
         return 2;
     }
 
-    var singleLogger = new ConsoleLogger(logLevel);
+    var singleLogger = new ConsoleLogger(logLevel, debugPageIndex);
     return await CropFileAsync(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), cropSettings, optimizationSettings, singleLogger);
 }
 
 static void ShowUsage()
 {
-    Console.WriteLine("Usage: PdfCropper.Cli <input.pdf> <output.pdf> [options]");
+    Console.WriteLine("Usage: DimonSmart.PdfCropper.Cli.exe <input.pdf> <output.pdf> [options]");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --preset <name>      Apply a preset of crop and optimization options");
@@ -170,6 +171,7 @@ static void ShowUsage()
     Console.WriteLine("  --merge-font-subsets  Merge duplicate font subset resources before other optimizations");
     Console.WriteLine("  --merge              Merge all inputs into a single output PDF");
     Console.WriteLine("                        Output must be a file path without wildcards");
+    Console.WriteLine("  --debug-page <n>      Emit extended diagnostics for a single page (1-based index, enables info logging)");
     Console.WriteLine("  -v, --verbose         Enable verbose logging (alias for --log-level information)");
     Console.WriteLine("  -l, --log-level <lvl> Logging level:");
     Console.WriteLine("                        none = no logging (default)");
@@ -184,15 +186,16 @@ static void ShowUsage()
     Console.WriteLine("  Output can be a mask (out/*_CROP.pdf) or a directory path.");
     Console.WriteLine();
     Console.WriteLine("Examples:");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --preset ebook");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 1 -v");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --margin 2.0");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --preset aggressive -v");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf -m 01 --margin 1.5 -v");
-    Console.WriteLine("  PdfCropper.Cli scans/*.pdf output/*_CROP.pdf");
-    Console.WriteLine("  PdfCropper.Cli scans/*.pdf merged/scans.pdf --merge");
-    Console.WriteLine("  PdfCropper.Cli input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset ebook");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 1 -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 2.0");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 01 --margin 1.5 -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe scans/*.pdf output/*_CROP.pdf");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe scans/*.pdf merged/scans.pdf --merge");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --debug-page 2");
 }
 
 static async Task<int> CropFileAsync(

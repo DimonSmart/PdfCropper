@@ -176,30 +176,30 @@ catch (PdfCropException ex)
 
 ```bash
 # ContentBased method (default)
-PdfCropper.Cli input.pdf output.pdf
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf
 ```
 
 ### BitmapBased Method
 
 ```bash
 # Use bitmap-based cropping
-PdfCropper.Cli input.pdf output.pdf -m 1
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 1
 ```
 
 ### Custom Safety Margin
 
 ```bash
 # Default margin (0.5 points)
-PdfCropper.Cli input.pdf output.pdf
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf
 
 # No margin (crop tight to content)
-PdfCropper.Cli input.pdf output.pdf --margin 0
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 0
 
 # Small margin (1 point)
-PdfCropper.Cli input.pdf output.pdf --margin 1.0
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 1.0
 
 # Large margin (5 points)
-PdfCropper.Cli input.pdf output.pdf --margin 5.0
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 5.0
 ```
 
 **Note:** Margin is specified in points (1 point = 1/72 inch ≈ 0.35 mm)
@@ -208,7 +208,7 @@ PdfCropper.Cli input.pdf output.pdf --margin 5.0
 
 ```bash
 # Enable detailed logging
-PdfCropper.Cli input.pdf output.pdf -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -v
 
 # Example output:
 # [INFO] Reading input file: input.pdf
@@ -221,50 +221,57 @@ PdfCropper.Cli input.pdf output.pdf -v
 # ...
 ```
 
+### Debug Page Diagnostics
+
+```bash
+# Emit extended diagnostics for a single page (1-based index)
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --debug-page 2
+```
+
 ### Repeated Content Detection
 
 ```bash
 # Enable detection of repeated content (headers, footers, watermarks)
-PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --detect-repeated-objects on -v
 
 # Disable detection of repeated content
-PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects off -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --detect-repeated-objects off -v
 
 # Detect objects that appear on 85% or more pages
-PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-threshold 85
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --detect-repeated-objects on --repeated-threshold 85
 
 # Only apply repeated detection to documents with 5 or more pages
-PdfCropper.Cli input.pdf output.pdf --detect-repeated-objects on --repeated-min-pages 5
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --detect-repeated-objects on --repeated-min-pages 5
 
 # Use presets that include repeated detection (default threshold: 40%)
-PdfCropper.Cli input.pdf output.pdf --preset ebook -v  # Detects repeated content
-PdfCropper.Cli input.pdf output.pdf --preset aggressive -v  # Detects repeated content
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset ebook -v  # Detects repeated content
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v  # Detects repeated content
 ```
 
 ### All Options Combined
 
 ```bash
 # BitmapBased method with verbose logging
-PdfCropper.Cli input.pdf output.pdf -m 1 -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 1 -v
 
 # ContentBased with custom margin and verbose logging
-PdfCropper.Cli input.pdf output.pdf --margin 2.5 -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 2.5 -v
 
 # BitmapBased with custom margin, excluding edge content
-PdfCropper.Cli input.pdf output.pdf -m 1 --margin 3.0
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 1 --margin 3.0
 
 # ContentBased excluding edge content with large margin
-PdfCropper.Cli input.pdf output.pdf -m 01 --margin 5.0 -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 01 --margin 5.0 -v
 ```
 
 ### Merge Multiple PDFs
 
 ```bash
 # Merge every PDF from the scans folder into a single cropped document
-PdfCropper.Cli "scans/*.pdf" merged/scans.pdf --merge
+DimonSmart.PdfCropper.Cli.exe "scans/*.pdf" merged/scans.pdf --merge
 
 # Output must be a specific file path (wildcards and directories are not allowed)
-PdfCropper.Cli "~/Documents/**/*.pdf" merged/collection.pdf --merge
+DimonSmart.PdfCropper.Cli.exe "~/Documents/**/*.pdf" merged/collection.pdf --merge
 ```
 
 ## Logger Output Examples

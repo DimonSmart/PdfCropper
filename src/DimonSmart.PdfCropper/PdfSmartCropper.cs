@@ -347,6 +347,8 @@ public static class PdfSmartCropper
         await logger.LogInfoAsync(startMessage).ConfigureAwait(false);
         await Task.Yield();
 
+        var debugLogger = logger as IPdfCropDebugLogger;
+
         if (cropSettings.Method == CropMethod.ContentBased && cropSettings.ExcludeEdgeTouchingObjects)
         {
             await logger.LogInfoAsync($"Edge-touching content within {cropSettings.EdgeExclusionTolerance:F2} pt of the page boundary will be ignored during bounds detection").ConfigureAwait(false);
@@ -431,6 +433,12 @@ public static class PdfSmartCropper
             var page = pdfDocument.GetPage(pageIndex);
             var pageStopwatch = Stopwatch.StartNew();
             var pageSize = page.GetPageSize();
+            var isDebugPage = debugLogger?.ShouldLogDebugForPage(pageIndex) == true;
+
+            if (isDebugPage)
+            {
+                await LogPageDebugInfoAsync(page, pageIndex, logger).ConfigureAwait(false);
+            }
 
             Rectangle? cropRectangle = cropSettings.Method switch
             {
@@ -459,6 +467,22 @@ public static class PdfSmartCropper
                     cropSettings.EdgeExclusionTolerance,
                     ct,
                     repeatedObjects);
+                if (isDebugPage)
+                {
+                    var maxObjectLogs = debugLogger?.MaxObjectLogs ?? 0;
+                    await LogContentAnalysisAsync(analysis, pageIndex, logger, "Detected", maxObjectLogs).ConfigureAwait(false);
+
+                    if (cropSettings.ExcludeEdgeTouchingObjects)
+                    {
+                        var edgeInclusiveAnalysis = ContentBasedCroppingStrategy.AnalyzePage(
+                            page,
+                            excludeEdgeTouchingObjects: false,
+                            cropSettings.EdgeExclusionTolerance,
+                            ct,
+                            repeatedObjects);
+                        await LogContentAnalysisAsync(edgeInclusiveAnalysis, pageIndex, logger, "No edge exclusion", maxObjectLogs).ConfigureAwait(false);
+                    }
+                }
                 var bounds = ContentBasedCroppingStrategy.CalculateBounds(analysis);
                 if (bounds.HasValue)
                 {
@@ -492,6 +516,247 @@ public static class PdfSmartCropper
 
             await Task.Yield();
         }
+    }
+
+    private static async Task LogPageDebugInfoAsync(PdfPage page, int pageIndex, IPdfCropLogger logger)
+    {
+        var pageSize = page.GetPageSize();
+        var rotatedSize = page.GetPageSizeWithRotation();
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - rotation = {page.GetRotation()}").ConfigureAwait(false);
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - page size = {pageSize.GetWidth():F2} x {pageSize.GetHeight():F2} pts").ConfigureAwait(false);
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - page size (rotated) = {rotatedSize.GetWidth():F2} x {rotatedSize.GetHeight():F2} pts").ConfigureAwait(false);
+
+        await LogPageBoxAsync(pageIndex, logger, "media box", page.GetMediaBox()).ConfigureAwait(false);
+        await LogPageBoxAsync(pageIndex, logger, "crop box", page.GetCropBox()).ConfigureAwait(false);
+        await LogPageBoxAsync(pageIndex, logger, "trim box", page.GetTrimBox()).ConfigureAwait(false);
+        await LogPageBoxAsync(pageIndex, logger, "bleed box", page.GetBleedBox()).ConfigureAwait(false);
+        await LogPageBoxAsync(pageIndex, logger, "art box", page.GetArtBox()).ConfigureAwait(false);
+
+        var userUnit = page.GetPdfObject()?.GetAsNumber(PdfName.UserUnit)?.FloatValue();
+        if (userUnit.HasValue)
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - user unit = {userUnit.Value:F2}").ConfigureAwait(false);
+        }
+
+        var contentBytes = page.GetContentBytes();
+        var contentLength = contentBytes?.Length ?? 0;
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - content bytes = {contentLength}").ConfigureAwait(false);
+
+        var annots = page.GetPdfObject()?.GetAsArray(PdfName.Annots);
+        var annotCount = annots?.Size() ?? 0;
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - annotations = {annotCount}").ConfigureAwait(false);
+
+        var resources = page.GetResources();
+        var xObjects = resources?.GetResource(PdfName.XObject) as PdfDictionary;
+        if (xObjects == null)
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - XObject resources = none").ConfigureAwait(false);
+            return;
+        }
+
+        var imageCount = 0;
+        var formCount = 0;
+        var otherCount = 0;
+        var imageSamples = new List<string>();
+
+        foreach (var name in xObjects.KeySet())
+        {
+            var stream = xObjects.GetAsStream(name);
+            var dict = (PdfDictionary?)stream ?? xObjects.GetAsDictionary(name);
+            var subtype = dict?.GetAsName(PdfName.Subtype);
+
+            if (PdfName.Image.Equals(subtype))
+            {
+                imageCount++;
+                if (imageSamples.Count < 5)
+                {
+                    var width = dict?.GetAsNumber(PdfName.Width)?.IntValue();
+                    var height = dict?.GetAsNumber(PdfName.Height)?.IntValue();
+                    if (width.HasValue && height.HasValue)
+                    {
+                        imageSamples.Add($"{name.GetValue()} {width.Value}x{height.Value}");
+                    }
+                    else
+                    {
+                        imageSamples.Add($"{name.GetValue()} unknown size");
+                    }
+                }
+            }
+            else if (PdfName.Form.Equals(subtype))
+            {
+                formCount++;
+            }
+            else
+            {
+                otherCount++;
+            }
+        }
+
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - XObjects = {xObjects.Size()}, images = {imageCount}, forms = {formCount}, other = {otherCount}").ConfigureAwait(false);
+        if (imageSamples.Count > 0)
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - image XObject samples: {string.Join(", ", imageSamples)}").ConfigureAwait(false);
+        }
+    }
+
+    private static async Task LogPageBoxAsync(int pageIndex, IPdfCropLogger logger, string label, Rectangle? box)
+    {
+        if (box == null)
+        {
+            return;
+        }
+
+        var message = $"Page {pageIndex}: Debug - {label} = ({box.GetLeft():F2}, {box.GetBottom():F2}, {box.GetWidth():F2}, {box.GetHeight():F2})";
+        await logger.LogInfoAsync(message).ConfigureAwait(false);
+    }
+
+    private static async Task LogContentAnalysisAsync(
+        ContentBasedCroppingStrategy.PageContentAnalysis analysis,
+        int pageIndex,
+        IPdfCropLogger logger,
+        string label,
+        int maxObjects)
+    {
+        var objects = analysis.Objects;
+        var totalCount = objects.Count;
+        var textCount = 0;
+        var imageCount = 0;
+        var pathCount = 0;
+
+        foreach (var obj in objects)
+        {
+            switch (obj.Key.Type)
+            {
+                case ContentBasedCroppingStrategy.ContentObjectType.Text:
+                    textCount++;
+                    break;
+                case ContentBasedCroppingStrategy.ContentObjectType.Image:
+                    imageCount++;
+                    break;
+                case ContentBasedCroppingStrategy.ContentObjectType.Path:
+                    pathCount++;
+                    break;
+            }
+        }
+
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - {label} objects = {totalCount} (text {textCount}, image {imageCount}, path {pathCount})").ConfigureAwait(false);
+
+        if (totalCount == 0)
+        {
+            return;
+        }
+
+        if (imageCount > 0 && TryUnionBounds(objects, ContentBasedCroppingStrategy.ContentObjectType.Image, out var imageBounds))
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - image bounds union = {FormatBounds(imageBounds)}").ConfigureAwait(false);
+        }
+
+        if (pathCount > 0 && TryUnionBounds(objects, ContentBasedCroppingStrategy.ContentObjectType.Path, out var pathBounds))
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - path bounds union = {FormatBounds(pathBounds)}").ConfigureAwait(false);
+        }
+
+        if (textCount > 0 && TryUnionBounds(objects, ContentBasedCroppingStrategy.ContentObjectType.Text, out var textBounds))
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - text bounds union = {FormatBounds(textBounds)}").ConfigureAwait(false);
+        }
+
+        if (maxObjects <= 0)
+        {
+            return;
+        }
+
+        var largest = objects
+            .Select(obj =>
+            {
+                var width = obj.Bounds.MaxX - obj.Bounds.MinX;
+                var height = obj.Bounds.MaxY - obj.Bounds.MinY;
+                var area = Math.Abs(width * height);
+                return (obj, area);
+            })
+            .OrderByDescending(entry => entry.area)
+            .Take(maxObjects)
+            .ToList();
+
+        if (largest.Count == 0)
+        {
+            return;
+        }
+
+        await logger.LogInfoAsync($"Page {pageIndex}: Debug - largest objects ({largest.Count}):").ConfigureAwait(false);
+        foreach (var entry in largest)
+        {
+            await logger.LogInfoAsync($"Page {pageIndex}: Debug - {FormatObjectDetails(entry.obj, entry.area)}").ConfigureAwait(false);
+        }
+    }
+
+    private static bool TryUnionBounds(
+        IReadOnlyList<ContentBasedCroppingStrategy.DetectedContentObject> objects,
+        ContentBasedCroppingStrategy.ContentObjectType type,
+        out ContentBasedCroppingStrategy.BoundingBox bounds)
+    {
+        bounds = default;
+        var hasBounds = false;
+
+        foreach (var obj in objects)
+        {
+            if (obj.Key.Type != type)
+            {
+                continue;
+            }
+
+            bounds = hasBounds ? bounds.Include(obj.Bounds) : obj.Bounds;
+            hasBounds = true;
+        }
+
+        return hasBounds;
+    }
+
+    private static string FormatBounds(ContentBasedCroppingStrategy.BoundingBox bounds)
+    {
+        return $"({bounds.MinX:F2}, {bounds.MinY:F2}) to ({bounds.MaxX:F2}, {bounds.MaxY:F2})";
+    }
+
+    private static string FormatObjectDetails(ContentBasedCroppingStrategy.DetectedContentObject obj, double area)
+    {
+        var bounds = obj.Bounds;
+        var width = bounds.MaxX - bounds.MinX;
+        var height = bounds.MaxY - bounds.MinY;
+        var detail = obj.Key.Type switch
+        {
+            ContentBasedCroppingStrategy.ContentObjectType.Text => $"text=\"{TrimText(obj.Key.Text, 32)}\"",
+            ContentBasedCroppingStrategy.ContentObjectType.Image => $"imageId={FormatNullable(obj.Key.ImageResourceId)}",
+            ContentBasedCroppingStrategy.ContentObjectType.Path => $"pathHash={FormatNullable(obj.Key.PathHash)}",
+            _ => "unknown"
+        };
+
+        return $"{obj.Key.Type} bounds=({bounds.MinX:F2}, {bounds.MinY:F2}) to ({bounds.MaxX:F2}, {bounds.MaxY:F2}) size={width:F2}x{height:F2} area={area:F2} {detail}";
+    }
+
+    private static string TrimText(string? text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        if (sanitized.Length <= maxLength)
+        {
+            return sanitized;
+        }
+
+        return sanitized[..maxLength] + "...";
+    }
+
+    private static string FormatNullable(long? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "n/a";
+    }
+
+    private static string FormatNullable(int? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "n/a";
     }
 
     private static async Task ApplyFinalOptimizationsAsync(

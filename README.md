@@ -25,7 +25,7 @@ The CLI utility is particularly useful for reading e-books with minimal margins,
 
 Need the tool without compiling it yourself? Grab the latest self-contained Windows build here:
 
-* [PdfCropper.Cli-win-x64.exe](https://github.com/DimonSmart/PdfCropper/releases/latest/download/PdfCropper.Cli-win-x64.exe) – portable single-file executable that works on any 64-bit Windows machine.
+* [DimonSmart.PdfCropper.Cli.exe](https://github.com/DimonSmart/PdfCropper/releases/latest/download/DimonSmart.PdfCropper.Cli.exe) – portable single-file executable that works on any 64-bit Windows machine.
 
 Each tagged release also contains the NuGet package and the CLI executable as downloadable assets.
 
@@ -130,16 +130,19 @@ The repository includes a console application that wraps the library. This CLI t
 
 ```bash
 # Run the ready-made Windows build (download link above)
-PdfCropper.Cli-win-x64.exe input.pdf output.pdf
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf
 
 # Use the e-book preset (ignores edge artefacts, keeps 1pt margin)
-PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset ebook
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset ebook
 
 # Apply the aggressive preset with verbose logging
-PdfCropper.Cli-win-x64.exe input.pdf output.pdf --preset aggressive -v
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v
+
+# Emit detailed diagnostics for a single page
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --debug-page 2
 
 # Merge multiple PDFs matched by a mask into a single output
-PdfCropper.Cli-win-x64.exe "scans/*.pdf" merged/scans.pdf --merge
+DimonSmart.PdfCropper.Cli.exe "scans/*.pdf" merged/scans.pdf --merge
 
 # From source (cross-platform)
 dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csproj -- input.pdf output.pdf --preset simple
@@ -153,6 +156,7 @@ dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csp
   - `1` = BitmapBased (renders to image, slower but more accurate)
 - `--merge` - Crop every matched input and merge the results into a single PDF. Requires an explicit output file path without wildcards.
 - `-v, --verbose` - Enable verbose logging
+- `--debug-page <n>` - Emit extended diagnostics for a single page (1-based index). Enables info logging if none is set.
 - All low-level switches (`--margin`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
 
 **Tip:** When using `--merge`, the output argument must be a file (for example `merged/book.pdf`). Directory paths or wildcard masks are not allowed because the tool produces one PDF.
@@ -195,6 +199,16 @@ public interface IPdfCropLogger
     void LogInfo(string message);
     void LogWarning(string message);
     void LogError(string message);
+}
+```
+
+### IPdfCropDebugLogger Interface
+
+```csharp
+public interface IPdfCropDebugLogger
+{
+    bool ShouldLogDebugForPage(int pageIndex);
+    int MaxObjectLogs { get; }
 }
 ```
 

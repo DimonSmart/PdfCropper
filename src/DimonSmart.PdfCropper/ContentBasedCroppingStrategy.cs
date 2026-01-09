@@ -230,14 +230,12 @@ internal static class ContentBasedCroppingStrategy
                 return;
             }
 
-            var width = image?.GetWidth() ?? 1;
-            var height = image?.GetHeight() ?? 1;
-
             var builder = new BoundsBuilder();
+            // Image CTM is already scaled to user space by iText; use unit square to avoid double-scaling.
             builder.Include(TransformPoint(0, 0, matrix));
-            builder.Include(TransformPoint(width, 0, matrix));
-            builder.Include(TransformPoint(0, height, matrix));
-            builder.Include(TransformPoint(width, height, matrix));
+            builder.Include(TransformPoint(1, 0, matrix));
+            builder.Include(TransformPoint(0, 1, matrix));
+            builder.Include(TransformPoint(1, 1, matrix));
 
             long? imageObjectId = null;
             if (image != null)
@@ -256,11 +254,18 @@ internal static class ContentBasedCroppingStrategy
                 return;
             }
 
+            var operation = info.GetOperation();
+            // Ignore clip-only paths; they don't produce visible content and should not affect cropping.
+            if ((operation & (PathRenderInfo.STROKE | PathRenderInfo.FILL)) == 0)
+            {
+                return;
+            }
+
             var matrix = info.GetCtm();
             var strokeExpandX = 0d;
             var strokeExpandY = 0d;
 
-            if ((info.GetOperation() & PathRenderInfo.STROKE) != 0)
+            if ((operation & PathRenderInfo.STROKE) != 0)
             {
                 var lineWidth = info.GetLineWidth();
                 if (lineWidth > 0)
@@ -302,7 +307,7 @@ internal static class ContentBasedCroppingStrategy
                 }
             }
 
-            var pathHash = CalculatePathSignature(path, matrix, info.GetOperation());
+            var pathHash = CalculatePathSignature(path, matrix, operation);
             CommitBounds(builder, strokeExpandX, strokeExpandY, new ContentObjectMetadata(ContentObjectType.Path, null, null, pathHash));
         }
 
