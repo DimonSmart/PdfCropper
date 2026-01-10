@@ -19,6 +19,7 @@ public readonly struct CropSettings
     /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
     /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
     /// <param name="repeatedObjectMinimumPageCount">Minimum document page count before repeated object detection is attempted.</param>
+    /// <param name="pageRange">Optional page range filter that limits which pages are processed and retained.</param>
     public CropSettings(
         CropMethod method,
         bool excludeEdgeTouchingObjects = false,
@@ -26,7 +27,8 @@ public readonly struct CropSettings
         float edgeExclusionTolerance = 1.0f,
         bool detectRepeatedObjects = false,
         double repeatedObjectOccurrenceThreshold = 40.0,
-        int repeatedObjectMinimumPageCount = 3)
+        int repeatedObjectMinimumPageCount = 3,
+        PageRange? pageRange = null)
         : this(
             method,
             excludeEdgeTouchingObjects,
@@ -34,7 +36,8 @@ public readonly struct CropSettings
             edgeExclusionTolerance,
             detectRepeatedObjects,
             repeatedObjectOccurrenceThreshold,
-            repeatedObjectMinimumPageCount)
+            repeatedObjectMinimumPageCount,
+            pageRange)
     {
     }
 
@@ -47,13 +50,15 @@ public readonly struct CropSettings
     /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
     /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
     /// <param name="repeatedObjectMinimumPageCount">Minimum document page count before repeated object detection is attempted.</param>
+    /// <param name="pageRange">Optional page range filter that limits which pages are processed and retained.</param>
     public CropSettings(
         CropMethod method,
         CropMargins margins,
         float edgeExclusionTolerance = 1.0f,
         bool detectRepeatedObjects = false,
         double repeatedObjectOccurrenceThreshold = 40.0,
-        int repeatedObjectMinimumPageCount = 3)
+        int repeatedObjectMinimumPageCount = 3,
+        PageRange? pageRange = null)
         : this(
             method,
             excludeEdgeTouchingObjects: false,
@@ -61,7 +66,8 @@ public readonly struct CropSettings
             edgeExclusionTolerance,
             detectRepeatedObjects,
             repeatedObjectOccurrenceThreshold,
-            repeatedObjectMinimumPageCount)
+            repeatedObjectMinimumPageCount,
+            pageRange)
     {
     }
 
@@ -77,6 +83,7 @@ public readonly struct CropSettings
     /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
     /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
     /// <param name="repeatedObjectMinimumPageCount">Minimum document page count before repeated object detection is attempted.</param>
+    /// <param name="pageRange">Optional page range filter that limits which pages are processed and retained.</param>
     public CropSettings(
         CropMethod method,
         bool excludeEdgeTouchingObjects,
@@ -84,7 +91,8 @@ public readonly struct CropSettings
         float edgeExclusionTolerance = 1.0f,
         bool detectRepeatedObjects = false,
         double repeatedObjectOccurrenceThreshold = 40.0,
-        int repeatedObjectMinimumPageCount = 3)
+        int repeatedObjectMinimumPageCount = 3,
+        PageRange? pageRange = null)
     {
         Method = method;
         ExcludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
@@ -102,6 +110,10 @@ public readonly struct CropSettings
             throw new ArgumentOutOfRangeException(nameof(repeatedObjectMinimumPageCount), repeatedObjectMinimumPageCount, "Repeated object detection requires at least two pages.");
 
         RepeatedObjectMinimumPageCount = repeatedObjectMinimumPageCount;
+        if (pageRange?.HasError == true)
+            throw new ArgumentException($"Page range expression is invalid: {pageRange.ErrorMessage}", nameof(pageRange));
+
+        PageRange = pageRange;
     }
 
     /// <summary>
@@ -143,6 +155,11 @@ public readonly struct CropSettings
     /// Gets the minimum number of pages required in a document before repeated object detection is applied.
     /// </summary>
     public int RepeatedObjectMinimumPageCount { get; }
+
+    /// <summary>
+    /// Gets an optional page range filter that limits which pages are processed and retained.
+    /// </summary>
+    public PageRange? PageRange { get; }
 
     /// <summary>
     /// Gets the default cropping settings.

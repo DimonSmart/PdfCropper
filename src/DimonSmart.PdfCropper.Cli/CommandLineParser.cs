@@ -87,6 +87,7 @@ internal static class CommandLineParser
         PdfCompatibilityLevel? targetPdfVersion = null;
         var mergeIntoSingleOutput = false;
         var mergeFontSubsets = false;
+        PageRange? pageRange = null;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -125,6 +126,23 @@ internal static class CommandLineParser
                     }
 
                     debugPageIndex = parsedDebugPage;
+                    break;
+
+                case "--pages":
+                case "--page-range":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--pages requires a value (e.g. \"1,4-6,8-\")");
+                    }
+
+                    var rangeExpression = args[++i];
+                    var parsedRange = new PageRange(rangeExpression);
+                    if (parsedRange.HasError)
+                    {
+                        return CommandLineParseResult.Failure($"Invalid page range '{rangeExpression}': {parsedRange.ErrorMessage}");
+                    }
+
+                    pageRange = parsedRange;
                     break;
 
                 case "-m":
@@ -412,7 +430,8 @@ internal static class CommandLineParser
             edgeExclusionTolerance,
             detectRepeatedObjects: detectRepeated,
             repeatedObjectOccurrenceThreshold: repeatedThreshold,
-            repeatedObjectMinimumPageCount: repeatedMinimumPages);
+            repeatedObjectMinimumPageCount: repeatedMinimumPages,
+            pageRange: pageRange);
         var optimizationSettings = new PdfOptimizationSettings(
             compressionLevel,
             enableFullCompression,

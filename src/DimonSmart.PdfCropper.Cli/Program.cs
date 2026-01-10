@@ -154,6 +154,8 @@ static void ShowUsage()
     Console.WriteLine("                        00 = ContentBased with edge-touching content included");
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
+    Console.WriteLine("  --pages <spec>     Only process and keep pages in the selection");
+    Console.WriteLine("                        Examples: \"1,4-6,8-\" or \"-3\"");
     Console.WriteLine("  --margin <points>     Uniform safety margin in points around content (default: 0.5)");
     Console.WriteLine("  --margin-left <points>   Left safety margin in points");
     Console.WriteLine("  --margin-bottom <points> Bottom safety margin in points");
@@ -197,6 +199,7 @@ static void ShowUsage()
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin-left 1 --margin-right 3 --margin-top 2 --margin-bottom 0.5");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 01 --margin 1.5 -v");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --pages \"1,4-6,8-\"");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe scans/*.pdf output/*_CROP.pdf");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe scans/*.pdf merged/scans.pdf --merge");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --compression-level BEST_COMPRESSION --full-compression --smart --remove-unused -v");

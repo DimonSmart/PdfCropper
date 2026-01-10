@@ -343,9 +343,34 @@ public static class PdfSmartCropper
         CancellationToken ct)
     {
         var pageCount = pdfDocument.GetNumberOfPages();
+        var pageRange = cropSettings.PageRange;
+        var selectedPages = new bool[pageCount];
+        var selectedPageCount = 0;
+
+        for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
+        {
+            var isSelected = pageRange == null || pageRange.Contains(pageIndex);
+            selectedPages[pageIndex - 1] = isSelected;
+            if (isSelected)
+            {
+                selectedPageCount++;
+            }
+        }
+
         var startMessage = $"Processing PDF with {pageCount} page(s) using {cropSettings.Method} method";
         await logger.LogInfoAsync(startMessage).ConfigureAwait(false);
         await Task.Yield();
+
+        if (pageRange != null)
+        {
+            await logger.LogInfoAsync($"Page selection '{pageRange}' matched {selectedPageCount}/{pageCount} page(s).").ConfigureAwait(false);
+            await Task.Yield();
+
+            if (selectedPageCount == 0)
+            {
+                throw new PdfCropException(PdfCropErrorCode.ProcessingError, "Page selection does not match any pages in the document.");
+            }
+        }
 
         var debugLogger = logger as IPdfCropDebugLogger;
 
@@ -357,7 +382,7 @@ public static class PdfSmartCropper
         var shouldDetectRepeatedObjects =
             cropSettings.Method == CropMethod.ContentBased &&
             cropSettings.DetectRepeatedObjects &&
-            pageCount >= cropSettings.RepeatedObjectMinimumPageCount;
+            selectedPageCount >= cropSettings.RepeatedObjectMinimumPageCount;
 
         var repeatedDetectionAnalyses = shouldDetectRepeatedObjects
             ? new ContentBasedCroppingStrategy.PageContentAnalysis?[pageCount]
@@ -368,6 +393,14 @@ public static class PdfSmartCropper
         for (var pageIndex = 1; pageIndex <= pageCount; pageIndex++)
         {
             ct.ThrowIfCancellationRequested();
+            if (!selectedPages[pageIndex - 1])
+            {
+                await logger.LogInfoAsync($"Page {pageIndex}: Skipped (not selected)").ConfigureAwait(false);
+                skippedPages[pageIndex - 1] = true;
+                await Task.Yield();
+                continue;
+            }
+
             var page = pdfDocument.GetPage(pageIndex);
             var pageStopwatch = Stopwatch.StartNew();
             var pageSize = page.GetPageSize();
@@ -515,6 +548,20 @@ public static class PdfSmartCropper
             await logger.LogInfoAsync(timeMessage).ConfigureAwait(false);
 
             await Task.Yield();
+        }
+
+        if (pageRange != null && selectedPageCount < pageCount)
+        {
+            await logger.LogInfoAsync($"Removing {pageCount - selectedPageCount} page(s) outside the selection.").ConfigureAwait(false);
+            await Task.Yield();
+
+            for (var pageIndex = pageCount; pageIndex >= 1; pageIndex--)
+            {
+                if (!selectedPages[pageIndex - 1])
+                {
+                    pdfDocument.RemovePage(pageIndex);
+                }
+            }
         }
     }
 
