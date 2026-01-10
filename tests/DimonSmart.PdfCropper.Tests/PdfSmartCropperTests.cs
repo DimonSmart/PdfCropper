@@ -224,14 +224,55 @@ public class PdfSmartCropperTests
         Assert.True(cropCustom.GetHeight() > cropDefault.GetHeight());
 
         // The difference should be approximately 2 * (custom margin - default margin) for each dimension
-        var expectedWidthDiff = 2 * (customMargin - 0.5f);
-        var expectedHeightDiff = 2 * (customMargin - 0.5f);
+        var defaultMargin = CropSettings.Default.Margins.Left;
+        var expectedWidthDiff = 2 * (customMargin - defaultMargin);
+        var expectedHeightDiff = 2 * (customMargin - defaultMargin);
 
         var actualWidthDiff = cropCustom.GetWidth() - cropDefault.GetWidth();
         var actualHeightDiff = cropCustom.GetHeight() - cropDefault.GetHeight();
 
         Assert.True(Math.Abs(actualWidthDiff - expectedWidthDiff) < 1.0f);
         Assert.True(Math.Abs(actualHeightDiff - expectedHeightDiff) < 1.0f);
+    }
+
+    [Fact]
+    public async Task CropAsync_WithPerSideMargins_AppliesEachSide()
+    {
+        var margins = new CropMargins(left: 6.0f, bottom: 2.5f, right: 9.0f, top: 4.0f);
+        var input = CreatePdf(pdf =>
+        {
+            using var document = new Document(pdf, PageSize.A4);
+            document.SetMargins(100, 100, 100, 100);
+            document.Add(new Paragraph("Test content with per-side margins").SetFontSize(12));
+        });
+
+        var settingsDefault = new CropSettings(CropMethod.ContentBased);
+        var settingsCustom = new CropSettings(CropMethod.ContentBased, margins: margins);
+
+        var croppedDefault = await PdfSmartCropper.CropAsync(input, settingsDefault);
+        var croppedCustom = await PdfSmartCropper.CropAsync(input, settingsCustom);
+
+        using var resultDefault = new PdfDocument(new PdfReader(new MemoryStream(croppedDefault)));
+        using var resultCustom = new PdfDocument(new PdfReader(new MemoryStream(croppedCustom)));
+
+        var cropDefault = resultDefault.GetPage(1).GetCropBox();
+        var cropCustom = resultCustom.GetPage(1).GetCropBox();
+
+        var defaultMargin = CropSettings.Default.Margins.Left;
+        var expectedLeftDiff = margins.Left - defaultMargin;
+        var expectedBottomDiff = margins.Bottom - defaultMargin;
+        var expectedRightDiff = margins.Right - defaultMargin;
+        var expectedTopDiff = margins.Top - defaultMargin;
+
+        var actualLeftDiff = cropDefault.GetLeft() - cropCustom.GetLeft();
+        var actualBottomDiff = cropDefault.GetBottom() - cropCustom.GetBottom();
+        var actualRightDiff = cropCustom.GetRight() - cropDefault.GetRight();
+        var actualTopDiff = cropCustom.GetTop() - cropDefault.GetTop();
+
+        Assert.True(Math.Abs(actualLeftDiff - expectedLeftDiff) < 1.0f);
+        Assert.True(Math.Abs(actualBottomDiff - expectedBottomDiff) < 1.0f);
+        Assert.True(Math.Abs(actualRightDiff - expectedRightDiff) < 1.0f);
+        Assert.True(Math.Abs(actualTopDiff - expectedTopDiff) < 1.0f);
     }
 
     [Fact]

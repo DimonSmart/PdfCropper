@@ -77,6 +77,14 @@ byte[] cropped = await PdfSmartCropper.CropAsync(inputBytes, CropSettings.Defaul
 
 `CropSettings.Default` uses the `ContentBased` method, keeps a 0.5pt safety margin, and leaves document metadata untouched.
 
+To set different margins per side, use `CropMargins`:
+
+```csharp
+var settings = new CropSettings(
+    CropMethod.ContentBased,
+    margins: new CropMargins(left: 2f, bottom: 1f, right: 3f, top: 2f));
+```
+
 ### Aggressive crop with all clean-up switches
 
 ```csharp
@@ -141,6 +149,9 @@ DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v
 # Emit detailed diagnostics for a single page
 DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --debug-page 2
 
+# Apply per-side margins
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin-left 1 --margin-right 3 --margin-top 2 --margin-bottom 0.5
+
 # Merge multiple PDFs matched by a mask into a single output
 DimonSmart.PdfCropper.Cli.exe "scans/*.pdf" merged/scans.pdf --merge
 
@@ -154,10 +165,15 @@ dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csp
 - `-m, --method <0|1>` - Cropping method:
   - `0` = ContentBased (default, analyzes PDF content)
   - `1` = BitmapBased (renders to image, slower but more accurate)
+- `--margin <points>` - Uniform safety margin in points around content (default: 0.5)
+- `--margin-left <points>` - Left safety margin in points
+- `--margin-bottom <points>` - Bottom safety margin in points
+- `--margin-right <points>` - Right safety margin in points
+- `--margin-top <points>` - Top safety margin in points
 - `--merge` - Crop every matched input and merge the results into a single PDF. Requires an explicit output file path without wildcards.
 - `-v, --verbose` - Enable verbose logging
 - `--debug-page <n>` - Emit extended diagnostics for a single page (1-based index). Enables info logging if none is set.
-- All low-level switches (`--margin`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
+- All low-level switches (`--margin`, `--margin-left`, `--compression-level`, `--smart`, etc.) remain available to fine-tune or override a preset
 
 **Tip:** When using `--merge`, the output argument must be a file (for example `merged/book.pdf`). Directory paths or wildcard masks are not allowed because the tool produces one PDF.
 

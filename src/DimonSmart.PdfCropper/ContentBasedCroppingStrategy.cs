@@ -54,7 +54,7 @@ internal static class ContentBasedCroppingStrategy
     /// <param name="logger">Logger for cropping operations.</param>
     /// <param name="pageIndex">The 1-based page index.</param>
     /// <param name="excludeEdgeTouchingObjects">Whether to exclude objects touching page edges.</param>
-    /// <param name="margin">Margin to add around content bounds.</param>
+    /// <param name="margins">Margins to add around content bounds.</param>
     /// <param name="edgeExclusionTolerance">Tolerance for considering content as touching a page edge.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="ignoredObjects">Set of content keys to exclude from bounds calculation.</param>
@@ -64,7 +64,7 @@ internal static class ContentBasedCroppingStrategy
         IPdfCropLogger logger,
         int pageIndex,
         bool excludeEdgeTouchingObjects,
-        float margin,
+        CropMargins margins,
         float edgeExclusionTolerance,
         CancellationToken ct,
         IReadOnlySet<ContentObjectKey>? ignoredObjects = null)
@@ -78,7 +78,7 @@ internal static class ContentBasedCroppingStrategy
 
         await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
 
-        return bounds.Value.ToRectangle(page.GetPageSize(), margin);
+        return bounds.Value.ToRectangle(page.GetPageSize(), margins);
     }
 
     internal readonly struct BoundingBox(double minX, double minY, double maxX, double maxY)
@@ -101,12 +101,12 @@ internal static class ContentBasedCroppingStrategy
             return new BoundingBox(minX, minY, maxX, maxY);
         }
 
-        public Rectangle? ToRectangle(Rectangle pageBox, float margin)
+        public Rectangle? ToRectangle(Rectangle pageBox, CropMargins margins)
         {
-            var left = (float)Math.Max(pageBox.GetLeft(), MinX - margin);
-            var bottom = (float)Math.Max(pageBox.GetBottom(), MinY - margin);
-            var right = (float)Math.Min(pageBox.GetRight(), MaxX + margin);
-            var top = (float)Math.Min(pageBox.GetTop(), MaxY + margin);
+            var left = (float)Math.Max(pageBox.GetLeft(), MinX - margins.Left);
+            var bottom = (float)Math.Max(pageBox.GetBottom(), MinY - margins.Bottom);
+            var right = (float)Math.Min(pageBox.GetRight(), MaxX + margins.Right);
+            var top = (float)Math.Min(pageBox.GetTop(), MaxY + margins.Top);
 
             var width = right - left;
             var height = top - bottom;

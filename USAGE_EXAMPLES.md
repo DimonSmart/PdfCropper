@@ -145,7 +145,22 @@ byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, settingsWithRepeat
 await File.WriteAllBytesAsync("output.pdf", croppedPdf);
 ```
 
-### 6. Error Handling
+### 6. Per-Side Margins
+
+```csharp
+using PdfCropper;
+
+var settings = new CropSettings(
+    CropMethod.ContentBased,
+    margins: new CropMargins(left: 2.0f, bottom: 1.0f, right: 3.0f, top: 2.0f)
+);
+
+byte[] inputPdf = await File.ReadAllBytesAsync("input.pdf");
+byte[] croppedPdf = await PdfSmartCropper.CropAsync(inputPdf, settings);
+await File.WriteAllBytesAsync("output.pdf", croppedPdf);
+```
+
+### 7. Error Handling
 
 ```csharp
 using PdfCropper;
@@ -200,9 +215,14 @@ DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 1.0
 
 # Large margin (5 points)
 DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 5.0
+
+# Per-side margins
+DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin-left 1 --margin-right 3 --margin-top 2 --margin-bottom 0.5
 ```
 
 **Note:** Margin is specified in points (1 point = 1/72 inch ≈ 0.35 mm)
+
+**Tip:** Use `--margin` for a uniform value, or `--margin-left/right/top/bottom` to override individual sides.
 
 ### Verbose Logging
 

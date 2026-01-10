@@ -154,7 +154,11 @@ static void ShowUsage()
     Console.WriteLine("                        00 = ContentBased with edge-touching content included");
     Console.WriteLine("                        01 = ContentBased excluding content touching page edges");
     Console.WriteLine("                        1  = BitmapBased (renders to image, slower but more accurate)");
-    Console.WriteLine("  --margin <points>     Safety margin in points around content (default: 0.5)");
+    Console.WriteLine("  --margin <points>     Uniform safety margin in points around content (default: 0.5)");
+    Console.WriteLine("  --margin-left <points>   Left safety margin in points");
+    Console.WriteLine("  --margin-bottom <points> Bottom safety margin in points");
+    Console.WriteLine("  --margin-right <points>  Right safety margin in points");
+    Console.WriteLine("  --margin-top <points>    Top safety margin in points");
     Console.WriteLine("  --detect-repeated-objects <on|off>  Exclude content repeated on most pages (content-based only)");
     Console.WriteLine("  --repeated-threshold <percent>  Minimum percentage of pages for repeated content (default: 40)");
     Console.WriteLine("  --repeated-min-pages <count>    Minimum document pages before detection (default: 3)");
@@ -190,6 +194,7 @@ static void ShowUsage()
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset ebook");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 1 -v");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin 2.0");
+    Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --margin-left 1 --margin-right 3 --margin-top 2 --margin-bottom 0.5");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf --preset aggressive -v");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe input.pdf output.pdf -m 01 --margin 1.5 -v");
     Console.WriteLine("  DimonSmart.PdfCropper.Cli.exe scans/*.pdf output/*_CROP.pdf");

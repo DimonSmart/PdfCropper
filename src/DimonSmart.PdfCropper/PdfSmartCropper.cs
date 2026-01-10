@@ -450,7 +450,7 @@ public static class PdfSmartCropper
                         pageIndex,
                         pageSize,
                         logger,
-                        cropSettings.Margin,
+                        cropSettings.Margins,
                         ct).ConfigureAwait(false),
 #pragma warning restore CA1416 // Validate platform compatibility
                 CropMethod.BitmapBased => throw new PdfCropException(
@@ -487,7 +487,7 @@ public static class PdfSmartCropper
                 if (bounds.HasValue)
                 {
                     await logger.LogInfoAsync($"Page {pageIndex}: Content bounds = ({bounds.Value.MinX:F2}, {bounds.Value.MinY:F2}) to ({bounds.Value.MaxX:F2}, {bounds.Value.MaxY:F2})").ConfigureAwait(false);
-                    cropRectangle = bounds.Value.ToRectangle(pageSize, cropSettings.Margin);
+                    cropRectangle = bounds.Value.ToRectangle(pageSize, cropSettings.Margins);
                 }
             }
 

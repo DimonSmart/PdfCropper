@@ -14,7 +14,7 @@ public readonly struct CropSettings
     /// <param name="excludeEdgeTouchingObjects">
     /// Whether to ignore content that touches current page boundaries when analyzing content bounds.
     /// </param>
-    /// <param name="margin">Safety margin in points to add around detected content bounds.</param>
+    /// <param name="margin">Uniform safety margin in points to add around detected content bounds.</param>
     /// <param name="edgeExclusionTolerance">Maximum distance from the page edge (in points) for content to be considered touching the edge.</param>
     /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
     /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
@@ -27,10 +27,68 @@ public readonly struct CropSettings
         bool detectRepeatedObjects = false,
         double repeatedObjectOccurrenceThreshold = 40.0,
         int repeatedObjectMinimumPageCount = 3)
+        : this(
+            method,
+            excludeEdgeTouchingObjects,
+            new CropMargins(margin),
+            edgeExclusionTolerance,
+            detectRepeatedObjects,
+            repeatedObjectOccurrenceThreshold,
+            repeatedObjectMinimumPageCount)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CropSettings"/> struct.
+    /// </summary>
+    /// <param name="method">Cropping method to use.</param>
+    /// <param name="margins">Per-side safety margins in points to add around detected content bounds.</param>
+    /// <param name="edgeExclusionTolerance">Maximum distance from the page edge (in points) for content to be considered touching the edge.</param>
+    /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
+    /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
+    /// <param name="repeatedObjectMinimumPageCount">Minimum document page count before repeated object detection is attempted.</param>
+    public CropSettings(
+        CropMethod method,
+        CropMargins margins,
+        float edgeExclusionTolerance = 1.0f,
+        bool detectRepeatedObjects = false,
+        double repeatedObjectOccurrenceThreshold = 40.0,
+        int repeatedObjectMinimumPageCount = 3)
+        : this(
+            method,
+            excludeEdgeTouchingObjects: false,
+            margins,
+            edgeExclusionTolerance,
+            detectRepeatedObjects,
+            repeatedObjectOccurrenceThreshold,
+            repeatedObjectMinimumPageCount)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CropSettings"/> struct.
+    /// </summary>
+    /// <param name="method">Cropping method to use.</param>
+    /// <param name="excludeEdgeTouchingObjects">
+    /// Whether to ignore content that touches current page boundaries when analyzing content bounds.
+    /// </param>
+    /// <param name="margins">Per-side safety margins in points to add around detected content bounds.</param>
+    /// <param name="edgeExclusionTolerance">Maximum distance from the page edge (in points) for content to be considered touching the edge.</param>
+    /// <param name="detectRepeatedObjects">Whether to exclude content objects that repeat across the majority of pages.</param>
+    /// <param name="repeatedObjectOccurrenceThreshold">Percentage of analyzed pages on which an object must appear to be considered repeated.</param>
+    /// <param name="repeatedObjectMinimumPageCount">Minimum document page count before repeated object detection is attempted.</param>
+    public CropSettings(
+        CropMethod method,
+        bool excludeEdgeTouchingObjects,
+        CropMargins margins,
+        float edgeExclusionTolerance = 1.0f,
+        bool detectRepeatedObjects = false,
+        double repeatedObjectOccurrenceThreshold = 40.0,
+        int repeatedObjectMinimumPageCount = 3)
     {
         Method = method;
         ExcludeEdgeTouchingObjects = excludeEdgeTouchingObjects;
-        Margin = margin;
+        Margins = margins;
         if (edgeExclusionTolerance < 0)
             throw new ArgumentOutOfRangeException(nameof(edgeExclusionTolerance), edgeExclusionTolerance, "Edge exclusion tolerance must be non-negative.");
 
@@ -57,9 +115,14 @@ public readonly struct CropSettings
     public bool ExcludeEdgeTouchingObjects { get; }
 
     /// <summary>
-    /// Gets the safety margin in points to add around detected content bounds.
+    /// Gets the average safety margin in points across all sides.
     /// </summary>
-    public float Margin { get; }
+    public float Margin => Margins.Average;
+
+    /// <summary>
+    /// Gets the per-side safety margins in points to add around detected content bounds.
+    /// </summary>
+    public CropMargins Margins { get; }
 
     /// <summary>
     /// Gets the tolerance distance (in points) for classifying content as touching a page edge.

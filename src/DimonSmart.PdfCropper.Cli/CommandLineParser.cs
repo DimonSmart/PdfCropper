@@ -64,7 +64,11 @@ internal static class CommandLineParser
 
         var method = CropSettings.Default.Method;
         var excludeEdge = CropSettings.Default.ExcludeEdgeTouchingObjects;
-        var margin = CropSettings.Default.Margin;
+        var defaultMargins = CropSettings.Default.Margins;
+        var marginLeft = defaultMargins.Left;
+        var marginBottom = defaultMargins.Bottom;
+        var marginRight = defaultMargins.Right;
+        var marginTop = defaultMargins.Top;
         var edgeExclusionTolerance = CropSettings.Default.EdgeExclusionTolerance;
         var detectRepeated = CropSettings.Default.DetectRepeatedObjects;
         var repeatedThreshold = CropSettings.Default.RepeatedObjectOccurrenceThreshold;
@@ -143,9 +147,65 @@ internal static class CommandLineParser
                         return CommandLineParseResult.Failure("--margin requires a numeric value (margin in points)");
                     }
 
-                    if (!float.TryParse(args[++i], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out margin) || margin < 0)
+                    if (!TryParseMargin(args[++i], out var uniformMargin))
                     {
                         return CommandLineParseResult.Failure("margin must be a non-negative number");
+                    }
+
+                    marginLeft = uniformMargin;
+                    marginBottom = uniformMargin;
+                    marginRight = uniformMargin;
+                    marginTop = uniformMargin;
+                    break;
+
+                case "--margin-left":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--margin-left requires a numeric value (margin in points)");
+                    }
+
+                    if (!TryParseMargin(args[++i], out marginLeft))
+                    {
+                        return CommandLineParseResult.Failure("margin-left must be a non-negative number");
+                    }
+
+                    break;
+
+                case "--margin-bottom":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--margin-bottom requires a numeric value (margin in points)");
+                    }
+
+                    if (!TryParseMargin(args[++i], out marginBottom))
+                    {
+                        return CommandLineParseResult.Failure("margin-bottom must be a non-negative number");
+                    }
+
+                    break;
+
+                case "--margin-right":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--margin-right requires a numeric value (margin in points)");
+                    }
+
+                    if (!TryParseMargin(args[++i], out marginRight))
+                    {
+                        return CommandLineParseResult.Failure("margin-right must be a non-negative number");
+                    }
+
+                    break;
+
+                case "--margin-top":
+                    if (i + 1 >= args.Length)
+                    {
+                        return CommandLineParseResult.Failure("--margin-top requires a numeric value (margin in points)");
+                    }
+
+                    if (!TryParseMargin(args[++i], out marginTop))
+                    {
+                        return CommandLineParseResult.Failure("margin-top must be a non-negative number");
                     }
 
                     break;
@@ -205,7 +265,11 @@ internal static class CommandLineParser
 
                     method = presetProfile.CropSettings.Method;
                     excludeEdge = presetProfile.CropSettings.ExcludeEdgeTouchingObjects;
-                    margin = presetProfile.CropSettings.Margin;
+                    var presetMargins = presetProfile.CropSettings.Margins;
+                    marginLeft = presetMargins.Left;
+                    marginBottom = presetMargins.Bottom;
+                    marginRight = presetMargins.Right;
+                    marginTop = presetMargins.Top;
                     edgeExclusionTolerance = presetProfile.CropSettings.EdgeExclusionTolerance;
                     detectRepeated = presetProfile.CropSettings.DetectRepeatedObjects;
                     repeatedThreshold = presetProfile.CropSettings.RepeatedObjectOccurrenceThreshold;
@@ -336,10 +400,15 @@ internal static class CommandLineParser
             logLevel = LogLevel.Information;
         }
 
+        var margins = new CropMargins(
+            left: marginLeft,
+            bottom: marginBottom,
+            right: marginRight,
+            top: marginTop);
         var cropSettings = new CropSettings(
             method,
             excludeEdge,
-            margin,
+            margins,
             edgeExclusionTolerance,
             detectRepeatedObjects: detectRepeated,
             repeatedObjectOccurrenceThreshold: repeatedThreshold,
@@ -381,6 +450,11 @@ internal static class CommandLineParser
         }
 
         return Directory.Exists(path);
+    }
+
+    private static bool TryParseMargin(string value, out float margin)
+    {
+        return float.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out margin) && margin >= 0;
     }
 
     private static bool TryParseCompressionLevel(string value, out int level)

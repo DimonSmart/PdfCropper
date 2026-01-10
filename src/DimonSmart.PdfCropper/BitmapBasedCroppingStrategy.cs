@@ -27,7 +27,7 @@ internal static class BitmapBasedCroppingStrategy
     /// <param name="pageIndex">The 1-based page index.</param>
     /// <param name="pageSize">The original page size.</param>
     /// <param name="logger">Logger for cropping operations.</param>
-    /// <param name="margin">Margin to add around content bounds.</param>
+    /// <param name="margins">Margins to add around content bounds.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The crop rectangle, or null if no content found.</returns>
     [SupportedOSPlatform("windows")]
@@ -36,7 +36,7 @@ internal static class BitmapBasedCroppingStrategy
     [SupportedOSPlatform("android31.0")]
     [SupportedOSPlatform("ios13.6")]
     [SupportedOSPlatform("maccatalyst13.5")]
-    public static async Task<Rectangle?> CropPageAsync(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, float margin, CancellationToken ct)
+    public static async Task<Rectangle?> CropPageAsync(byte[] inputPdf, int pageIndex, Rectangle pageSize, IPdfCropLogger logger, CropMargins margins, CancellationToken ct)
     {
         const byte threshold = 250;
 
@@ -60,10 +60,10 @@ internal static class BitmapBasedCroppingStrategy
             var scaleX = pageSize.GetWidth() / bitmap.Width;
             var scaleY = pageSize.GetHeight() / bitmap.Height;
 
-            var left = minX * scaleX - margin;
-            var bottom = pageSize.GetHeight() - (maxY * scaleY) - margin;
-            var right = maxX * scaleX + margin;
-            var top = pageSize.GetHeight() - (minY * scaleY) + margin;
+            var left = minX * scaleX - margins.Left;
+            var bottom = pageSize.GetHeight() - (maxY * scaleY) - margins.Bottom;
+            var right = maxX * scaleX + margins.Right;
+            var top = pageSize.GetHeight() - (minY * scaleY) + margins.Top;
 
             left = Math.Max(pageSize.GetLeft(), left);
             bottom = Math.Max(pageSize.GetBottom(), bottom);
