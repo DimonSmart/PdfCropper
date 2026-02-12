@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
 
 namespace DimonSmart.PdfCropper;
@@ -66,23 +64,11 @@ public sealed class PageRange
     /// <summary>
     /// Returns true when the specified 1-based page number is in the configured ranges.
     /// </summary>
-    public bool Contains(int pageNumber)
-    {
-        if (pageNumber < 1 || HasError)
-        {
-            return false;
-        }
+    public bool Contains(int pageNumber) =>
+        pageNumber >= 1 &&
+        !HasError &&
+        segments.Any(s => s.Contains(pageNumber));
 
-        foreach (var segment in segments)
-        {
-            if (segment.Contains(pageNumber))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     /// <inheritdoc />
     public override string ToString() => Expression;

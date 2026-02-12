@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas.Parser;
@@ -39,6 +38,11 @@ internal static class ContentBasedCroppingStrategy
 
         foreach (var detectedObject in analysis.Objects)
         {
+            if (!detectedObject.Bounds.IsValid)
+            {
+                continue;
+            }
+
             bounds = bounds.HasValue
                 ? bounds.Value.Include(detectedObject.Bounds)
                 : detectedObject.Bounds;
@@ -91,32 +95,53 @@ internal static class ContentBasedCroppingStrategy
 
         public double MaxY { get; } = maxY;
 
+        public bool IsValid =>
+            IsFiniteNumber(MinX) &&
+            IsFiniteNumber(MinY) &&
+            IsFiniteNumber(MaxX) &&
+            IsFiniteNumber(MaxY) &&
+            MaxX >= MinX &&
+            MaxY >= MinY;
+
         public BoundingBox Include(BoundingBox other)
-        {
+        { 
+            if (!IsValid) { return other; }
+            if (!other.IsValid) { return this; }
+            
             var minX = Math.Min(MinX, other.MinX);
             var minY = Math.Min(MinY, other.MinY);
             var maxX = Math.Max(MaxX, other.MaxX);
             var maxY = Math.Max(MaxY, other.MaxY);
-
             return new BoundingBox(minX, minY, maxX, maxY);
         }
 
+
         public Rectangle? ToRectangle(Rectangle pageBox, CropMargins margins)
         {
-            var left = (float)Math.Max(pageBox.GetLeft(), MinX - margins.Left);
-            var bottom = (float)Math.Max(pageBox.GetBottom(), MinY - margins.Bottom);
-            var right = (float)Math.Min(pageBox.GetRight(), MaxX + margins.Right);
-            var top = (float)Math.Min(pageBox.GetTop(), MaxY + margins.Top);
-
-            var width = right - left;
-            var height = top - bottom;
-
-            if (width <= 0 || height <= 0)
+            if (!IsValid)
             {
                 return null;
             }
 
-            return new Rectangle(left, bottom, width, height);
+            var left = Math.Max(pageBox.GetLeft(), MinX - margins.Left);
+            var bottom = Math.Max(pageBox.GetBottom(), MinY - margins.Bottom);
+            var right = Math.Min(pageBox.GetRight(), MaxX + margins.Right);
+            var top = Math.Min(pageBox.GetTop(), MaxY + margins.Top);
+
+            if (!IsFiniteNumber(left) || !IsFiniteNumber(bottom) || !IsFiniteNumber(right) || !IsFiniteNumber(top))
+            {
+                return null;
+            }
+
+            var width = right - left;
+            var height = top - bottom;
+
+            if (!IsFiniteNumber(width) || !IsFiniteNumber(height) || width <= 0 || height <= 0)
+            {
+                return null;
+            }
+
+            return new Rectangle((float)left, (float)bottom, (float)width, (float)height);
         }
     }
 
@@ -323,6 +348,11 @@ internal static class ContentBasedCroppingStrategy
 
         private void RegisterBounds(BoundingBox bounds, ContentObjectMetadata metadata)
         {
+            if (!bounds.IsValid)
+            {
+                return;
+            }
+
             if (_excludeEdgeTouchingObjects && TouchesPageEdge(bounds))
             {
                 return;
@@ -447,6 +477,11 @@ internal static class ContentBasedCroppingStrategy
                 var x = point.Get(Vector.I1);
                 var y = point.Get(Vector.I2);
 
+                if (!IsFiniteNumber(x) || !IsFiniteNumber(y))
+                {
+                    return;
+                }
+
                 if (!_minX.HasValue || x < _minX)
                 {
                     _minX = x;
@@ -476,14 +511,42 @@ internal static class ContentBasedCroppingStrategy
                     return false;
                 }
 
+                if (!IsFiniteNumber(expandX) || !IsFiniteNumber(expandY))
+                {
+                    bounds = default;
+                    return false;
+                }
+
+                var minX = _minX.Value - expandX;
+                var minY = _minY.Value - expandY;
+                var maxX = _maxX.Value + expandX;
+                var maxY = _maxY.Value + expandY;
+
+                if (!IsFiniteNumber(minX) || !IsFiniteNumber(minY) || !IsFiniteNumber(maxX) || !IsFiniteNumber(maxY))
+                {
+                    bounds = default;
+                    return false;
+                }
+
+                if (maxX < minX || maxY < minY)
+                {
+                    bounds = default;
+                    return false;
+                }
+
                 bounds = new BoundingBox(
-                    _minX.Value - expandX,
-                    _minY.Value - expandY,
-                    _maxX.Value + expandX,
-                    _maxY.Value + expandY);
+                    minX,
+                    minY,
+                    maxX,
+                    maxY);
                 return true;
             }
         }
+    }
+
+    private static bool IsFiniteNumber(double value)
+    {
+        return !double.IsNaN(value) && !double.IsInfinity(value);
     }
 
     private static long Quantize(double value)
