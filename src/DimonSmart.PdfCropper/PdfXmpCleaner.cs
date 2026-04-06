@@ -13,7 +13,7 @@ internal static class PdfXmpCleaner
 
         using var input = new MemoryStream(pdfBytes, writable: false);
         using var output = new MemoryStream();
-        using var reader = new PdfReader(input);
+        using var reader = new PdfReader(input, PdfReaderPropertiesFactory.Create(pdfBytes.LongLength));
         using var writer = new PdfWriter(output, PdfSmartCropper.CreateWriterProperties(optimizationSettings));
         using var document = new PdfDocument(reader, writer);
 

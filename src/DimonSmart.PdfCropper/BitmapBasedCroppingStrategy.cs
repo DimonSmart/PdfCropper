@@ -44,13 +44,17 @@ internal static class BitmapBasedCroppingStrategy
         {
             await logger.LogInfoAsync($"Page {pageIndex}: Rendering to bitmap").ConfigureAwait(false);
 
-            using var bitmap = Conversion.ToImage(inputPdf, page: pageIndex - 1);
+            using var bitmap = Conversion.ToImage(
+                inputPdf,
+                page: pageIndex - 1,
+                password: null,
+                options: CreateRenderOptions());
 
             await logger.LogInfoAsync($"Page {pageIndex}: Bitmap size = {bitmap.Width} x {bitmap.Height} pixels").ConfigureAwait(false);
 
             var (minX, minY, maxX, maxY) = FindContentBoundsInBitmap(bitmap, threshold, ct);
 
-            if (minX >= maxX || minY >= maxY)
+            if (maxX < minX || maxY < minY)
             {
                 await logger.LogWarningAsync($"Page {pageIndex}: No content found in bitmap").ConfigureAwait(false);
                 return null;
@@ -61,8 +65,8 @@ internal static class BitmapBasedCroppingStrategy
             var scaleY = pageSize.GetHeight() / bitmap.Height;
 
             var left = minX * scaleX - margins.Left;
-            var bottom = pageSize.GetHeight() - (maxY * scaleY) - margins.Bottom;
-            var right = maxX * scaleX + margins.Right;
+            var bottom = pageSize.GetHeight() - ((maxY + 1) * scaleY) - margins.Bottom;
+            var right = (maxX + 1) * scaleX + margins.Right;
             var top = pageSize.GetHeight() - (minY * scaleY) + margins.Top;
 
             left = Math.Max(pageSize.GetLeft(), left);
@@ -93,8 +97,8 @@ internal static class BitmapBasedCroppingStrategy
     {
         var minX = bitmap.Width;
         var minY = bitmap.Height;
-        var maxX = 0;
-        var maxY = 0;
+        var maxX = -1;
+        var maxY = -1;
 
         var pixels = bitmap.Bytes;
         var bytesPerPixel = bitmap.BytesPerPixel;
@@ -124,5 +128,16 @@ internal static class BitmapBasedCroppingStrategy
         }
 
         return (minX, minY, maxX, maxY);
+    }
+
+    private static RenderOptions CreateRenderOptions()
+    {
+        return new RenderOptions
+        {
+            BackgroundColor = SKColors.White,
+            UseTiling = true,
+            WithAnnotations = true,
+            WithFormFill = true
+        };
     }
 }

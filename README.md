@@ -37,7 +37,7 @@ Each tagged release also contains the NuGet package and the CLI executable as do
 ✅ **macOS** - Full support  
 ✅ **Other Unix systems** - Compatible with .NET runtime  
 
-**Target Frameworks**: .NET 8.0, .NET 9.0
+**Target Frameworks**: .NET 8.0, .NET 9.0, .NET 10.0
 
 ## Installation
 
@@ -188,11 +188,11 @@ dotnet run --project src/DimonSmart.PdfCropper.Cli/DimonSmart.PdfCropper.Cli.csp
 
 ## Development
 
-* Library target frameworks: `.NET 8.0`, `.NET 9.0`
+* Library target frameworks: `.NET 8.0`, `.NET 9.0`, `.NET 10.0`
 * Cross-platform support: Windows, Linux, macOS, and other Unix systems
 * Dependencies:
-  * iText 9.3.0 (PDF manipulation)
-  * PDFtoImage 5.1.1 (PDF to bitmap rendering) - includes native libraries for all platforms
+  * iText 9.6.0 (PDF manipulation)
+  * PDFtoImage 5.2.0 (PDF to bitmap rendering) - includes native libraries for all platforms
   * SkiaSharp (image processing) - cross-platform 2D graphics
 * Tests are located in `tests/PdfCropper.Tests` and use xUnit
 * Build with `dotnet build PdfCropper.sln`

@@ -200,7 +200,7 @@ public static class PdfSmartCropper
         using var inputStream = new MemoryStream(inputPdf, writable: false);
         using var outputStream = new MemoryStream();
 
-        using var reader = new PdfReader(inputStream, new ReaderProperties());
+        using var reader = new PdfReader(inputStream, PdfReaderPropertiesFactory.Create(inputPdf.LongLength));
         using var writer = CreatePdfWriter(outputStream, optimizationSettings);
         var pdfDocument = new PdfDocument(reader, writer);
         var closed = false;
@@ -267,7 +267,7 @@ public static class PdfSmartCropper
                 var croppedBytes = await CropWithoutFinalOptimizationsAsync(input, cropSettings, logger, ct).ConfigureAwait(false);
 
                 using var croppedStream = new MemoryStream(croppedBytes, writable: false);
-                using var reader = new PdfReader(croppedStream, new ReaderProperties());
+                using var reader = new PdfReader(croppedStream, PdfReaderPropertiesFactory.Create(croppedBytes.LongLength));
                 using var croppedDocument = new PdfDocument(reader);
 
                 var existingPageCount = outputDocument.GetNumberOfPages();
@@ -322,7 +322,7 @@ public static class PdfSmartCropper
 
         using var inputStream = new MemoryStream(inputPdf, writable: false);
         using var outputStream = new MemoryStream();
-        var readerProps = new ReaderProperties();
+        var readerProps = PdfReaderPropertiesFactory.Create(inputPdf.LongLength);
 
         using var reader = new PdfReader(inputStream, readerProps);
         using var writer = CreatePdfWriter(outputStream, PdfOptimizationSettings.Default);
@@ -876,7 +876,13 @@ public static class PdfSmartCropper
     {
         ct.ThrowIfCancellationRequested();
         var contentBytes = page.GetContentBytes();
-        return contentBytes == null || contentBytes.Length == 0;
+        if (contentBytes != null && contentBytes.Length > 0)
+        {
+            return false;
+        }
+
+        var annotations = page.GetPdfObject()?.GetAsArray(PdfName.Annots);
+        return annotations == null || annotations.Size() == 0;
     }
 
     private static bool ShouldRecompressDocumentStreams(PdfOptimizationSettings optimizationSettings)
